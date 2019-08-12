@@ -8,7 +8,7 @@ repository = "https://github.com/stjepang/async-task"
 homepage = "https://github.com/stjepang/async-task"
 documentation = "https://docs.rs/async-task"
 description = "Task abstraction for building executors"
-keywords = ["future", "task", "executor", "spawn"]
+keywords = ["futures", "task", "executor", "spawn"]
 categories = ["asynchronous", "concurrency"]
 
 [dependencies]
