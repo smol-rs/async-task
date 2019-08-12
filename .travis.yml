@@ -4,10 +4,16 @@ os: linux
 
 rust: nightly
 
+addons:
+  apt:
+    packages:
+      - valgrind
+
 before_script:
   - rustup component add rustfmt
 
 script:
-  - cargo check --benches --bins --examples --tests
-  - cargo test
   - cargo fmt --all -- --check
+  - cargo check --benches --bins --examples --tests
+  - CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="valgrind --leak-check=full --error-exitcode=1" \
+    cargo test
