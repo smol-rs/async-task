@@ -1,0 +1,13 @@
+language: rust
+
+os: linux
+
+rust: nightly
+
+before_script:
+  - rustup component add rustfmt
+
+script:
+  - cargo check --benches --bins --examples --tests
+  - cargo test
+  - cargo fmt --all -- --check
