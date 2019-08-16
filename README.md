@@ -1,5 +1,12 @@
 # async-task
 
+[![Build Status](https://travis-ci.org/async-rs/async-task.svg?branch=master)](https://travis-ci.org/async-rs/async-task)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](
+https://github.com/async-rs/async-task)
+[![Cargo](https://img.shields.io/crates/v/async-task.svg)](https://crates.io/crates/async-task)
+[![Documentation](https://docs.rs/async-task/badge.svg)](https://docs.rs/async-task)
+[![chat](https://img.shields.io/discord/598880689856970762.svg?logo=discord)](https://discord.gg/JvZeVNe)
+
 A task abstraction for building executors.
 
 This crate makes it possible to build an efficient and extendable executor in few lines of
