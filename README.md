@@ -7,10 +7,13 @@ https://github.com/async-rs/async-task)
 [![Documentation](https://docs.rs/async-task/badge.svg)](https://docs.rs/async-task)
 [![chat](https://img.shields.io/discord/598880689856970762.svg?logo=discord)](https://discord.gg/JvZeVNe)
 
-A task abstraction for building executors.
+Task abstraction for building executors.
 
-This crate makes it possible to build an efficient and extendable executor in few lines of
-code.
+To spawn a future onto an executor, we first need to allocate it on the heap and keep some
+state alongside it. The state indicates whether the future is ready for polling, waiting to be
+woken up, or completed. Such a future is called a *task*.
+
+This crate helps with task allocation and polling its future to completion.
 
 ## License
 
