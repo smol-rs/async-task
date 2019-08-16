@@ -353,7 +353,7 @@ where
         let new = (*raw.header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
 
         // If this was the last reference to the task and the `JoinHandle` has been dropped as
-        // well, then destroy task.
+        // well, then destroy the task.
         if new & !(REFERENCE - 1) == 0 && new & HANDLE == 0 {
             Self::destroy(ptr);
         }

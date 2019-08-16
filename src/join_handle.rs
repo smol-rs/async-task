@@ -12,36 +12,10 @@ use crate::utils::abort_on_panic;
 
 /// A handle that awaits the result of a task.
 ///
-/// If the task has completed with `value`, the handle returns it as `Some(value)`. If the task was
-/// cancelled or has panicked, the handle returns `None`. Otherwise, the handle has to wait until
-/// the task completes, panics, or gets cancelled.
+/// This type is a future that resolves to an `Option<R>` where:
 ///
-/// # Examples
-///
-/// ```
-/// #![feature(async_await)]
-///
-/// use crossbeam::channel;
-/// use futures::executor;
-///
-/// // The future inside the task.
-/// let future = async { 1 + 2 };
-///
-/// // If the task gets woken, it will be sent into this channel.
-/// let (s, r) = channel::unbounded();
-/// let schedule = move |task| s.send(task).unwrap();
-///
-/// // Create a task with the future and the schedule function.
-/// let (task, handle) = async_task::spawn(future, schedule, ());
-///
-/// // Run the task. In this example, it will complete after a single run.
-/// task.run();
-/// assert!(r.is_empty());
-///
-/// // Await the result of the task.
-/// let result = executor::block_on(handle);
-/// assert_eq!(result, Some(3));
-/// ```
+/// * `None` indicates the task has panicked or was cancelled
+/// * `Some(res)` indicates the task has completed with `res`
 pub struct JoinHandle<R, T> {
     /// A raw task pointer.
     pub(crate) raw_task: NonNull<()>,
@@ -58,39 +32,9 @@ impl<R, T> Unpin for JoinHandle<R, T> {}
 impl<R, T> JoinHandle<R, T> {
     /// Cancels the task.
     ///
-    /// When cancelled, the task won't be scheduled again even if a [`Waker`] wakes it. An attempt
-    /// to run it won't do anything. And if it's completed, awaiting its result evaluates to
-    /// `None`.
+    /// If the task has already completed, calling this method will have no effect.
     ///
-    /// [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(async_await)]
-    /// use crossbeam::channel;
-    /// use futures::executor;
-    ///
-    /// // The future inside the task.
-    /// let future = async { 1 + 2 };
-    ///
-    /// // If the task gets woken, it will be sent into this channel.
-    /// let (s, r) = channel::unbounded();
-    /// let schedule = move |task| s.send(task).unwrap();
-    ///
-    /// // Create a task with the future and the schedule function.
-    /// let (task, handle) = async_task::spawn(future, schedule, ());
-    ///
-    /// // Cancel the task.
-    /// handle.cancel();
-    ///
-    /// // Running a cancelled task does nothing.
-    /// task.run();
-    ///
-    /// // Await the result of the task.
-    /// let result = executor::block_on(handle);
-    /// assert_eq!(result, None);
-    /// ```
+    /// When a task is cancelled, its future cannot be polled again and will be dropped instead.
     pub fn cancel(&self) {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -139,26 +83,6 @@ impl<R, T> JoinHandle<R, T> {
     }
 
     /// Returns a reference to the tag stored inside the task.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(async_await)]
-    /// use crossbeam::channel;
-    ///
-    /// // The future inside the task.
-    /// let future = async { 1 + 2 };
-    ///
-    /// // If the task gets woken, it will be sent into this channel.
-    /// let (s, r) = channel::unbounded();
-    /// let schedule = move |task| s.send(task).unwrap();
-    ///
-    /// // Create a task with the future and the schedule function.
-    /// let (task, handle) = async_task::spawn(future, schedule, "a simple task");
-    ///
-    /// // Access the tag.
-    /// assert_eq!(*handle.tag(), "a simple task");
-    /// ```
     pub fn tag(&self) -> &T {
         let offset = Header::offset_tag::<T>();
         let ptr = self.raw_task.as_ptr();
@@ -210,9 +134,9 @@ impl<R, T> Drop for JoinHandle<R, T> {
                             Err(s) => state = s,
                         }
                     } else {
-                        // If this is the last reference to task and it's not closed, then close
-                        // it and schedule one more time so that its future gets dropped by the
-                        // executor.
+                        // If this is the last reference to the task and it's not closed, then
+                        // close it and schedule one more time so that its future gets dropped by
+                        // the executor.
                         let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
                             SCHEDULED | CLOSED | REFERENCE
                         } else {

@@ -1,142 +1,110 @@
 //! Task abstraction for building executors.
 //!
-//! # What is an executor?
+//! To spawn a future onto an executor, we first need to allocate it on the heap and keep some
+//! state alongside it. The state indicates whether the future is ready for polling, waiting to be
+//! woken up, or completed. Such a future is called a *task*.
 //!
-//! An async block creates a future and an async function returns one. But futures don't do
-//! anything unless they are awaited inside other async blocks or async functions. So the question
-//! arises: who or what awaits the main future that awaits others?
+//! This crate helps with task allocation and polling its future to completion.
 //!
-//! One solution is to call [`block_on()`] on the main future, which will block
-//! the current thread and keep polling the future until it completes. But sometimes we don't want
-//! to block the current thread and would prefer to *spawn* the future to let a background thread
-//! block on it instead.
+//! # Spawning
 //!
-//! This is where executors step in - they create a number of threads (typically equal to the
-//! number of CPU cores on the system) that are dedicated to polling spawned futures. Each executor
-//! thread keeps polling spawned futures in a loop and only blocks when all spawned futures are
-//! either sleeping or running.
-//!
-//! # What is a task?
-//!
-//! In order to spawn a future on an executor, one needs to allocate the future on the heap and
-//! keep some state alongside it, like whether the future is ready for polling, waiting to be woken
-//! up, or completed. This allocation is usually called a *task*.
-//!
-//! The executor then runs the spawned task by polling its future. If the future is pending on a
-//! resource, a [`Waker`] associated with the task will be registered somewhere so that the task
-//! can be woken up and run again at a later time.
-//!
-//! For example, if the future wants to read something from a TCP socket that is not ready yet, the
-//! networking system will clone the task's waker and wake it up once the socket becomes ready.
-//!
-//! # Task construction
-//!
-//! A task is constructed with [`Task::create()`]:
+//! All executors have some kind of queue that holds runnable tasks:
 //!
 //! ```
 //! # #![feature(async_await)]
-//! let future = async { 1 + 2 };
-//! let schedule = |task| unimplemented!();
-//!
-//! let (task, handle) = async_task::spawn(future, schedule, ());
+//! #
+//! let (sender, receiver) = crossbeam::channel::unbounded();
+//! #
+//! # // A future that will get spawned.
+//! # let future = async { 1 + 2 };
+//! #
+//! # // A function that schedules the task when it gets woken up.
+//! # let schedule = move |task| sender.send(task).unwrap();
+//! #
+//! # // Construct a task.
+//! # let (task, handle) = async_task::spawn(future, schedule, ());
 //! ```
 //!
-//! The first argument to the constructor, `()` in this example, is an arbitrary piece of data
-//! called a *tag*. This can be a task identifier, a task name, task-local storage, or something
-//! of similar nature.
+//! A task is constructed using the [`spawn`] function:
 //!
-//! The second argument is the future that gets polled when the task is run.
+//! ```
+//! # #![feature(async_await)]
+//! #
+//! # let (sender, receiver) = crossbeam::channel::unbounded();
+//! #
+//! // A future that will be spawned.
+//! let future = async { 1 + 2 };
 //!
-//! The third argument is the schedule function, which is called every time when the task gets
-//! woken up. This function should push the received task into some kind of queue of runnable
-//! tasks.
+//! // A function that schedules the task when it gets woken up.
+//! let schedule = move |task| sender.send(task).unwrap();
 //!
-//! The constructor returns a runnable [`Task`] and a [`JoinHandle`] that can await the result of
-//! the future.
+//! // Construct a task.
+//! let (task, handle) = async_task::spawn(future, schedule, ());
 //!
-//! # Task scheduling
+//! // Push the task into the queue by invoking its schedule function.
+//! task.schedule();
+//! ```
 //!
-//! TODO
+//! The last argument to the [`spawn`] function is a *tag*, an arbitrary piece of data associated
+//! with the task. In most executors, this is typically a task identifier or task-local storage.
 //!
-//! # Join handles
+//! The function returns a runnable [`Task`] and a [`JoinHandle`] that can await the result.
 //!
-//! TODO
+//! # Execution
+//!
+//! Task executors have some kind of main loop that drives tasks to completion. That means taking
+//! runnable tasks out of the queue and running each one in order:
+//!
+//! ```no_run
+//! # #![feature(async_await)]
+//! #
+//! # let (sender, receiver) = crossbeam::channel::unbounded();
+//! #
+//! # // A future that will get spawned.
+//! # let future = async { 1 + 2 };
+//! #
+//! # // A function that schedules the task when it gets woken up.
+//! # let schedule = move |task| sender.send(task).unwrap();
+//! #
+//! # // Construct a task.
+//! # let (task, handle) = async_task::spawn(future, schedule, ());
+//! #
+//! # // Push the task into the queue by invoking its schedule function.
+//! # task.schedule();
+//! #
+//! for task in receiver {
+//!     task.run();
+//! }
+//! ```
+//!
+//! When a task is run, its future gets polled. If polling does not complete the task, that means
+//! it's waiting for another future and needs to go to sleep. When woken up, its schedule function
+//! will be invoked, pushing it back into the queue so that it can be run again.
 //!
 //! # Cancellation
 //!
-//! TODO
+//! Both [`Task`] and [`JoinHandle`] have a method that cancels the task. When cancelled, the
+//! task's future will not be polled again and will get dropped instead.
+//!
+//! If cancelled by the [`Task`] instance, the task is destroyed immediately. If cancelled by the
+//! [`JoinHandle`] instance, it will be scheduled one more time and the next attempt to run it will
+//! simply destroy it.
 //!
 //! # Performance
 //!
-//! TODO: explain single allocation, etc.
+//! Task construction incurs a single allocation only that holds its state, the schedule function,
+//! and the future or the result of the future if completed.
 //!
-//! Task [construction] incurs a single allocation only. The [`Task`] can then be run and its
-//! result awaited through the [`JoinHandle`]. When woken, the task gets automatically rescheduled.
-//! It's also possible to cancel the task so that it stops running and can't be awaited anymore.
+//! The layout of a task is equivalent to 4 words followed by the schedule function, and then by a
+//! union of the future and its output.
 //!
-//! [construction]: struct.Task.html#method.create
-//! [`JoinHandle`]: struct.JoinHandle.html
+//! [`spawn`]: fn.spawn.html
 //! [`Task`]: struct.Task.html
-//! [`Future`]: https://doc.rust-lang.org/nightly/std/future/trait.Future.html
-//! [`Waker`]: https://doc.rust-lang.org/nightly/std/task/struct.Waker.html
-//! [`block_on()`]: https://docs.rs/futures-preview/*/futures/executor/fn.block_on.html
-//!
-//! # Examples
-//!
-//! A simple single-threaded executor:
-//!
-//! ```
-//! # #![feature(async_await)]
-//! use std::future::Future;
-//! use std::panic::catch_unwind;
-//! use std::thread;
-//!
-//! use async_task::{JoinHandle, Task};
-//! use crossbeam::channel::{unbounded, Sender};
-//! use futures::executor;
-//! use lazy_static::lazy_static;
-//!
-//! /// Spawns a future on the executor.
-//! fn spawn<F, R>(future: F) -> JoinHandle<R, ()>
-//! where
-//!     F: Future<Output = R> + Send + 'static,
-//!     R: Send + 'static,
-//! {
-//!     lazy_static! {
-//!         // A channel that holds scheduled tasks.
-//!         static ref QUEUE: Sender<Task<()>> = {
-//!             let (sender, receiver) = unbounded::<Task<()>>();
-//!
-//!             // Start the executor thread.
-//!             thread::spawn(|| {
-//!                 for task in receiver {
-//!                     // Ignore panics for simplicity.
-//!                     let _ignore_panic = catch_unwind(|| task.run());
-//!                 }
-//!             });
-//!
-//!             sender
-//!         };
-//!     }
-//!
-//!     // Create a task that is scheduled by sending itself into the channel.
-//!     let schedule = |t| QUEUE.send(t).unwrap();
-//!     let (task, handle) = async_task::spawn(future, schedule, ());
-//!
-//!     // Schedule the task by sending it into the channel.
-//!     task.schedule();
-//!
-//!     handle
-//! }
-//!
-//! // Spawn a future and await its result.
-//! let handle = spawn(async {
-//!     println!("Hello, world!");
-//! });
-//! executor::block_on(handle);
-//! ```
+//! [`JoinHandle`]: struct.JoinHandle.html
 
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
+#![doc(test(attr(deny(rust_2018_idioms, warnings))))]
+#![doc(test(attr(allow(unused_extern_crates, unused_variables))))]
 
 mod header;
 mod join_handle;
