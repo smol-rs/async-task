@@ -1,6 +1,6 @@
 # async-task
 
-[![Build Status](https://travis-ci.org/async-rs/async-task.svg?branch=master)](https://travis-ci.org/async-rs/async-task)
+[![Build Status](https://travis-ci.com/async-rs/async-task.svg?branch=master)](https://travis-ci.com/async-rs/async-task)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](
 https://github.com/async-rs/async-task)
 [![Cargo](https://img.shields.io/crates/v/async-task.svg)](https://crates.io/crates/async-task)
