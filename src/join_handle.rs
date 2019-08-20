@@ -14,13 +14,13 @@ use crate::utils::abort_on_panic;
 ///
 /// This type is a future that resolves to an `Option<R>` where:
 ///
-/// * `None` indicates the task has panicked or was cancelled
-/// * `Some(res)` indicates the task has completed with `res`
+/// * `None` indicates the task has panicked or was cancelled.
+/// * `Some(result)` indicates the task has completed with `result` of type `R`.
 pub struct JoinHandle<R, T> {
     /// A raw task pointer.
     pub(crate) raw_task: NonNull<()>,
 
-    /// A marker capturing the generic type `R`.
+    /// A marker capturing generic types `R` and `T`.
     pub(crate) _marker: PhantomData<(R, T)>,
 }
 
@@ -34,7 +34,7 @@ impl<R, T> JoinHandle<R, T> {
     ///
     /// If the task has already completed, calling this method will have no effect.
     ///
-    /// When a task is cancelled, its future cannot be polled again and will be dropped instead.
+    /// When a task is cancelled, its future will not be polled again.
     pub fn cancel(&self) {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -63,8 +63,8 @@ impl<R, T> JoinHandle<R, T> {
                     Ordering::Acquire,
                 ) {
                     Ok(_) => {
-                        // If the task is not scheduled nor running, schedule it so that its future
-                        // gets dropped by the executor.
+                        // If the task is not scheduled nor running, schedule it one more time so
+                        // that its future gets dropped by the executor.
                         if state & (SCHEDULED | RUNNING) == 0 {
                             ((*header).vtable.schedule)(ptr);
                         }

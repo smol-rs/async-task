@@ -21,7 +21,7 @@ pub(crate) struct Header {
 
     /// The task that is blocked on the `JoinHandle`.
     ///
-    /// This waker needs to be woken once the task completes or is closed.
+    /// This waker needs to be woken up once the task completes or is closed.
     pub(crate) awaiter: Cell<Option<Waker>>,
 
     /// The virtual table.
@@ -34,8 +34,8 @@ pub(crate) struct Header {
 impl Header {
     /// Cancels the task.
     ///
-    /// This method will only mark the task as closed and will notify the awaiter, but it won't
-    /// reschedule the task if it's not completed.
+    /// This method will mark the task as closed and notify the awaiter, but it won't reschedule
+    /// the task if it's not completed.
     pub(crate) fn cancel(&self) {
         let mut state = self.state.load(Ordering::Acquire);
 
@@ -65,9 +65,9 @@ impl Header {
         }
     }
 
-    /// Notifies the task blocked on the task.
+    /// Notifies the awaiter blocked on this task.
     ///
-    /// If there is a registered waker, it will be removed from the header and woken.
+    /// If there is a registered waker, it will be removed from the header and woken up.
     #[inline]
     pub(crate) fn notify(&self) {
         if let Some(waker) = self.swap_awaiter(None) {
@@ -78,9 +78,9 @@ impl Header {
         }
     }
 
-    /// Notifies the task blocked on the task unless its waker matches `current`.
+    /// Notifies the awaiter blocked on this task, unless its waker matches `current`.
     ///
-    /// If there is a registered waker, it will be removed from the header.
+    /// If there is a registered waker, it will be removed from the header in any case.
     #[inline]
     pub(crate) fn notify_unless(&self, current: &Waker) {
         if let Some(waker) = self.swap_awaiter(None) {
@@ -93,7 +93,7 @@ impl Header {
         }
     }
 
-    /// Swaps the awaiter and returns the previous value.
+    /// Swaps the awaiter for a new waker and returns the previous value.
     #[inline]
     pub(crate) fn swap_awaiter(&self, new: Option<Waker>) -> Option<Waker> {
         let new_is_none = new.is_none();

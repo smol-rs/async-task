@@ -1,8 +1,7 @@
 /// Set if the task is scheduled for running.
 ///
-/// A task is considered to be scheduled whenever its `Task` reference exists. It is in scheduled
-/// state at the moment of creation and when it gets unapused either by its `JoinHandle` or woken
-/// by a `Waker`.
+/// A task is considered to be scheduled whenever its `Task` reference exists. It therefore also
+/// begins in scheduled state at the moment of creation.
 ///
 /// This flag can't be set when the task is completed. However, it can be set while the task is
 /// running, in which case it will be rescheduled as soon as polling finishes.
@@ -10,30 +9,30 @@ pub(crate) const SCHEDULED: usize = 1 << 0;
 
 /// Set if the task is running.
 ///
-/// A task is running state while its future is being polled.
+/// A task is in running state while its future is being polled.
 ///
 /// This flag can't be set when the task is completed. However, it can be in scheduled state while
-/// it is running, in which case it will be rescheduled when it stops being polled.
+/// it is running, in which case it will be rescheduled as soon as polling finishes.
 pub(crate) const RUNNING: usize = 1 << 1;
 
 /// Set if the task has been completed.
 ///
 /// This flag is set when polling returns `Poll::Ready`. The output of the future is then stored
-/// inside the task until it becomes stopped. In fact, `JoinHandle` picks the output up by marking
-/// the task as stopped.
+/// inside the task until it becomes closed. In fact, `JoinHandle` picks up the output by marking
+/// the task as closed.
 ///
-/// This flag can't be set when the task is scheduled or completed.
+/// This flag can't be set when the task is scheduled or running.
 pub(crate) const COMPLETED: usize = 1 << 2;
 
 /// Set if the task is closed.
 ///
-/// If a task is closed, that means its either cancelled or its output has been consumed by the
+/// If a task is closed, that means it's either cancelled or its output has been consumed by the
 /// `JoinHandle`. A task becomes closed when:
 ///
-/// 1. It gets cancelled by `Task::cancel()` or `JoinHandle::cancel()`.
-/// 2. Its output is awaited by the `JoinHandle`.
+/// 1. It gets cancelled by `Task::cancel()`, `Task::drop()`, or `JoinHandle::cancel()`.
+/// 2. Its output gets awaited by the `JoinHandle`.
 /// 3. It panics while polling the future.
-/// 4. It is completed and the `JoinHandle` is dropped.
+/// 4. It is completed and the `JoinHandle` gets dropped.
 pub(crate) const CLOSED: usize = 1 << 3;
 
 /// Set if the `JoinHandle` still exists.
@@ -51,7 +50,7 @@ pub(crate) const AWAITER: usize = 1 << 5;
 
 /// Set if the awaiter is locked.
 ///
-/// This lock is acquired before a new awaiter is registered or the existing one is woken.
+/// This lock is acquired before a new awaiter is registered or the existing one is woken up.
 pub(crate) const LOCKED: usize = 1 << 6;
 
 /// A single reference.

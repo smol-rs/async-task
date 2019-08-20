@@ -13,8 +13,8 @@ use crate::JoinHandle;
 /// This constructor returns a [`Task`] reference that runs the future and a [`JoinHandle`] that
 /// awaits its result.
 ///
-/// When run, the task polls `future`. When woken, it gets scheduled for running by the `schedule`
-/// function. Argument `tag` is an arbitrary piece of data stored inside the task.
+/// When run, the task polls `future`. When woken up, it gets scheduled for running by the
+/// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
 ///
 /// [`Task`]: struct.Task.html
 /// [`JoinHandle`]: struct.JoinHandle.html
@@ -29,7 +29,7 @@ use crate::JoinHandle;
 ///     println!("Hello, world!");
 /// };
 ///
-/// // If the task gets woken, it will be sent into this channel.
+/// // If the task gets woken up, it will be sent into this channel.
 /// let (s, r) = channel::unbounded();
 /// let schedule = move |task| s.send(task).unwrap();
 ///
@@ -57,19 +57,19 @@ where
 
 /// A task reference that runs its future.
 ///
-/// The [`Task`] reference "owns" the task itself and is able to run it. Running consumes the
-/// [`Task`] reference and polls its internal future. If the future is still pending after getting
-/// polled, the [`Task`] reference simply won't exist until a [`Waker`] notifies the task. If the
-/// future completes, its result becomes available to the [`JoinHandle`].
+/// At any moment in time, there is at most one [`Task`] reference associated with a particular
+/// task. Running consumes the [`Task`] reference and polls its internal future. If the future is
+/// still pending after getting polled, the [`Task`] reference simply won't exist until a [`Waker`]
+/// notifies the task. If the future completes, its result becomes available to the [`JoinHandle`].
 ///
-/// When the task is woken, the [`Task`] reference is recreated and passed to the schedule
+/// When a task is woken up, its [`Task`] reference is recreated and passed to the schedule
 /// function. In most executors, scheduling simply pushes the [`Task`] reference into a queue of
 /// runnable tasks.
 ///
-/// If the [`Task`] reference is dropped without being run, the task is cancelled. When cancelled,
-/// the task won't be scheduled again even if a [`Waker`] wakes it. It is possible for the
-/// [`JoinHandle`] to cancel while the [`Task`] reference exists, in which case an attempt to run
-/// the task won't do anything.
+/// If the [`Task`] reference is dropped without getting run, the task is automatically cancelled.
+/// When cancelled, the task won't be scheduled again even if a [`Waker`] wakes it. It is possible
+/// for the [`JoinHandle`] to cancel while the [`Task`] reference exists, in which case an attempt
+/// to run the task won't do anything.
 ///
 /// [`run()`]: struct.Task.html#method.run
 /// [`JoinHandle`]: struct.JoinHandle.html
@@ -107,16 +107,14 @@ impl<T> Task<T> {
     ///
     /// This method polls the task's future. If the future completes, its result will become
     /// available to the [`JoinHandle`]. And if the future is still pending, the task will have to
-    /// be woken in order to be rescheduled and then run again.
+    /// be woken up in order to be rescheduled and run again.
     ///
     /// If the task was cancelled by a [`JoinHandle`] before it gets run, then this method won't do
     /// anything.
     ///
     /// It is possible that polling the future panics, in which case the panic will be propagated
     /// into the caller. It is advised that invocations of this method are wrapped inside
-    /// [`catch_unwind`].
-    ///
-    /// If a panic occurs, the task is automatically cancelled.
+    /// [`catch_unwind`]. If a panic occurs, the task is automatically cancelled.
     ///
     /// [`JoinHandle`]: struct.JoinHandle.html
     /// [`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
@@ -170,7 +168,7 @@ impl<T> Drop for Task<T> {
             ((*header).vtable.drop_future)(ptr);
 
             // Drop the task reference.
-            ((*header).vtable.decrement)(ptr);
+            ((*header).vtable.drop_task)(ptr);
         }
     }
 }

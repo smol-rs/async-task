@@ -344,3 +344,109 @@ fn cancel_and_wake_during_run() {
     })
     .unwrap();
 }
+
+#[test]
+fn drop_last_waker() {
+    future!(f, waker, POLL, DROP_F);
+    schedule!(s, chan, SCHEDULE, DROP_S);
+    task!(task, handle, f, s, DROP_D);
+
+    task.run();
+    let w = waker();
+
+    drop(handle);
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 0);
+
+    drop(w);
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 1);
+
+    chan.recv().unwrap().run();
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(chan.len(), 0);
+}
+
+#[test]
+fn cancel_last_handle() {
+    future!(f, waker, POLL, DROP_F);
+    schedule!(s, chan, SCHEDULE, DROP_S);
+    task!(task, handle, f, s, DROP_D);
+
+    task.run();
+    drop(waker());
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 0);
+
+    handle.cancel();
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 1);
+
+    chan.recv().unwrap().run();
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 0);
+
+    drop(handle);
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(chan.len(), 0);
+}
+
+#[test]
+fn drop_last_handle() {
+    future!(f, waker, POLL, DROP_F);
+    schedule!(s, chan, SCHEDULE, DROP_S);
+    task!(task, handle, f, s, DROP_D);
+
+    task.run();
+    drop(waker());
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 0);
+
+    drop(handle);
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(chan.len(), 1);
+
+    chan.recv().unwrap().run();
+    assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 1);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(chan.len(), 0);
+}

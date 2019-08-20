@@ -77,8 +77,8 @@
 //!
 //! # Cancellation
 //!
-//! Both [`Task`] and [`JoinHandle`] have a method that cancels the task. When cancelled, the
-//! task's future will not be polled again and will get dropped instead.
+//! Both [`Task`] and [`JoinHandle`] have methods that cancel the task. When cancelled, the task's
+//! future will not be polled again and will get dropped instead.
 //!
 //! If cancelled by the [`Task`] instance, the task is destroyed immediately. If cancelled by the
 //! [`JoinHandle`] instance, it will be scheduled one more time and the next attempt to run it will
@@ -86,8 +86,8 @@
 //!
 //! # Performance
 //!
-//! Task construction incurs a single allocation only that holds its state, the schedule function,
-//! and the future or the result of the future if completed.
+//! Task construction incurs a single allocation that holds its state, the schedule function, and
+//! the future or the result of the future if completed.
 //!
 //! The layout of a task is equivalent to 4 words followed by the schedule function, and then by a
 //! union of the future and its output.
