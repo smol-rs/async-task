@@ -1,7 +1,5 @@
 //! A simple single-threaded executor.
 
-#![feature(async_await)]
-
 use std::future::Future;
 use std::panic::catch_unwind;
 use std::thread;

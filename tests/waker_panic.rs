@@ -1,5 +1,3 @@
-#![feature(async_await)]
-
 use std::cell::Cell;
 use std::future::Future;
 use std::panic::catch_unwind;

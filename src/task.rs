@@ -22,8 +22,6 @@ use crate::JoinHandle;
 /// # Examples
 ///
 /// ```
-/// # #![feature(async_await)]
-/// #
 /// use crossbeam::channel;
 ///
 /// // The future inside the task.

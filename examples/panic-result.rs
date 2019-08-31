@@ -1,7 +1,5 @@
 //! A single-threaded executor where join handles catch panics inside tasks.
 
-#![feature(async_await)]
-
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::thread;

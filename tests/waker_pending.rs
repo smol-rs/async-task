@@ -1,5 +1,3 @@
-#![feature(async_await)]
-
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Waker;

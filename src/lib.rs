@@ -11,8 +11,6 @@
 //! All executors have some kind of queue that holds runnable tasks:
 //!
 //! ```
-//! # #![feature(async_await)]
-//! #
 //! let (sender, receiver) = crossbeam::channel::unbounded();
 //! #
 //! # // A future that will get spawned.
@@ -28,8 +26,6 @@
 //! A task is constructed using the [`spawn`] function:
 //!
 //! ```
-//! # #![feature(async_await)]
-//! #
 //! # let (sender, receiver) = crossbeam::channel::unbounded();
 //! #
 //! // A future that will be spawned.
@@ -56,8 +52,6 @@
 //! runnable tasks out of the queue and running each one in order:
 //!
 //! ```no_run
-//! # #![feature(async_await)]
-//! #
 //! # let (sender, receiver) = crossbeam::channel::unbounded();
 //! #
 //! # // A future that will get spawned.

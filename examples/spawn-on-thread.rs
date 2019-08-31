@@ -1,7 +1,5 @@
 //! A function that runs a future to completion on a dedicated thread.
 
-#![feature(async_await)]
-
 use std::future::Future;
 use std::sync::Arc;
 use std::thread;

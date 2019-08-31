@@ -1,5 +1,3 @@
-#![feature(async_await)]
-
 use std::future::Future;
 use std::panic::catch_unwind;
 use std::pin::Pin;

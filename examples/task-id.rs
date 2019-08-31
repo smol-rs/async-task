@@ -1,7 +1,5 @@
 //! An executor that assigns an ID to every spawned task.
 
-#![feature(async_await)]
-
 use std::cell::Cell;
 use std::future::Future;
 use std::panic::catch_unwind;

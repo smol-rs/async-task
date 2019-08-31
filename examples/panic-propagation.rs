@@ -1,7 +1,5 @@
 //! A single-threaded executor where join handles propagate panics from tasks.
 
-#![feature(async_await)]
-
 use std::future::Future;
 use std::panic::{resume_unwind, AssertUnwindSafe};
 use std::pin::Pin;
