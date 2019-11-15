@@ -1,31 +1,86 @@
-# async-task
+<h1 align="center">async-task</h1>
+<div align="center">
+  <strong>
+    A task abstraction for building executors.
+  </strong>
+</div>
 
-[![Build Status](https://travis-ci.com/async-rs/async-task.svg?branch=master)](https://travis-ci.com/async-rs/async-task)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](
-https://github.com/async-rs/async-task)
-[![Cargo](https://img.shields.io/crates/v/async-task.svg)](https://crates.io/crates/async-task)
-[![Documentation](https://docs.rs/async-task/badge.svg)](https://docs.rs/async-task)
-[![chat](https://img.shields.io/discord/598880689856970762.svg?logo=discord)](https://discord.gg/JvZeVNe)
+<br />
 
-Task abstraction for building executors.
+<div align="center">
+  <!-- Crates version -->
+  <a href="https://crates.io/crates/async-task">
+    <img src="https://img.shields.io/crates/v/async-task.svg?style=flat-square"
+    alt="Crates.io version" />
+  </a>
+  <!-- Downloads -->
+  <a href="https://crates.io/crates/async-task">
+    <img src="https://img.shields.io/crates/d/async-task.svg?style=flat-square"
+      alt="Download" />
+  </a>
+  <!-- docs.rs docs -->
+  <a href="https://docs.rs/async-task">
+    <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
+      alt="docs.rs docs" />
+  </a>
+  <a href="https://discord.gg/JvZeVNe">
+    <img src="https://img.shields.io/discord/598880689856970762.svg?logo=discord&style=flat-square"
+      alt="chat" />
+  </a>
+</div>
 
-To spawn a future onto an executor, we first need to allocate it on the heap and keep some
-state alongside it. The state indicates whether the future is ready for polling, waiting to be
-woken up, or completed. Such a future is called a *task*.
+<div align="center">
+  <h3>
+    <a href="https://docs.rs/async-task">
+      API Docs
+    </a>
+    <span> | </span>
+    <a href="https://github.com/async-rs/async-task/releases">
+      Releases
+    </a>
+    <span> | </span>
+    <a href="https://async.rs/contribute">
+      Contributing
+    </a>
+  </h3>
+</div>
 
-This crate helps with task allocation and polling its future to completion.
+## Installation
+
+With [cargo add][cargo-add] installed run:
+
+```sh
+$ cargo add async-task
+```
+
+[cargo-add]: https://github.com/killercup/cargo-edit
+
+## Safety
+This crate makes use of carefully checked `unsafe` blocks to construct an
+efficient timer implementation.
+
+## Contributing
+Want to join us? Check out our ["Contributing" guide][contributing] and take a
+look at some of these issues:
+
+- [Issues labeled "good first issue"][good-first-issue]
+- [Issues labeled "help wanted"][help-wanted]
+
+[contributing]: https://github.com/async-rs/async-task/blob/master.github/CONTRIBUTING.md
+[good-first-issue]: https://github.com/async-rs/async-task/labels/good%20first%20issue
+[help-wanted]: https://github.com/async-rs/async-task/labels/help%20wanted
 
 ## License
 
-Licensed under either of
+<sup>
+Licensed under either of <a href="LICENSE-APACHE">Apache License, Version
+2.0</a> or <a href="LICENSE-MIT">MIT license</a> at your option.
+</sup>
 
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+<br/>
 
-at your option.
-
-#### Contribution
-
+<sub>
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
+</sub>
