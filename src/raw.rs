@@ -95,15 +95,13 @@ impl<F, R, S, T> Clone for RawTask<F, R, S, T> {
 
 impl<F, R, S, T> RawTask<F, R, S, T>
 where
-    F: Future<Output = R> + Send + 'static,
-    R: Send + 'static,
+    F: Future<Output = R> + 'static,
     S: Fn(Task<T>) + Send + Sync + 'static,
-    T: Send + 'static,
 {
     /// Allocates a task with the given `future` and `schedule` function.
     ///
     /// It is assumed that initially only the `Task` reference and the `JoinHandle` exist.
-    pub(crate) fn allocate(tag: T, future: F, schedule: S) -> NonNull<()> {
+    pub(crate) fn allocate(future: F, schedule: S, tag: T) -> NonNull<()> {
         // Compute the layout of the task for allocation. Abort if the computation fails.
         let task_layout = abort_on_panic(|| Self::task_layout());
 
@@ -592,17 +590,13 @@ where
         /// A guard that closes the task if polling its future panics.
         struct Guard<F, R, S, T>(RawTask<F, R, S, T>)
         where
-            F: Future<Output = R> + Send + 'static,
-            R: Send + 'static,
-            S: Fn(Task<T>) + Send + Sync + 'static,
-            T: Send + 'static;
+            F: Future<Output = R> + 'static,
+            S: Fn(Task<T>) + Send + Sync + 'static;
 
         impl<F, R, S, T> Drop for Guard<F, R, S, T>
         where
-            F: Future<Output = R> + Send + 'static,
-            R: Send + 'static,
+            F: Future<Output = R> + 'static,
             S: Fn(Task<T>) + Send + Sync + 'static,
-            T: Send + 'static,
         {
             fn drop(&mut self) {
                 let raw = self.0;

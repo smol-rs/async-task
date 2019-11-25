@@ -13,6 +13,9 @@ use lazy_static::lazy_static;
 #[derive(Clone, Copy, Debug)]
 struct TaskId(usize);
 
+type Task = async_task::Task<TaskId>;
+type JoinHandle<T> = async_task::JoinHandle<T, TaskId>;
+
 thread_local! {
     /// The ID of the current task.
     static TASK_ID: Cell<Option<TaskId>> = Cell::new(None);
@@ -26,15 +29,15 @@ fn task_id() -> Option<TaskId> {
 }
 
 /// Spawns a future on the executor.
-fn spawn<F, R>(future: F) -> async_task::JoinHandle<R, TaskId>
+fn spawn<F, R>(future: F) -> JoinHandle<R>
 where
     F: Future<Output = R> + Send + 'static,
     R: Send + 'static,
 {
     lazy_static! {
         // A channel that holds scheduled tasks.
-        static ref QUEUE: Sender<async_task::Task<TaskId>> = {
-            let (sender, receiver) = unbounded::<async_task::Task<TaskId>>();
+        static ref QUEUE: Sender<Task> = {
+            let (sender, receiver) = unbounded::<Task>();
 
             // Start the executor thread.
             thread::spawn(|| {

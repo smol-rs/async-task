@@ -24,8 +24,8 @@ pub struct JoinHandle<R, T> {
     pub(crate) _marker: PhantomData<(R, T)>,
 }
 
-unsafe impl<R, T> Send for JoinHandle<R, T> {}
-unsafe impl<R, T> Sync for JoinHandle<R, T> {}
+unsafe impl<R: Send, T> Send for JoinHandle<R, T> {}
+unsafe impl<R: Send, T> Sync for JoinHandle<R, T> {}
 
 impl<R, T> Unpin for JoinHandle<R, T> {}
 

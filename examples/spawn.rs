@@ -8,16 +8,19 @@ use crossbeam::channel::{unbounded, Sender};
 use futures::executor;
 use lazy_static::lazy_static;
 
+type Task = async_task::Task<()>;
+type JoinHandle<T> = async_task::JoinHandle<T, ()>;
+
 /// Spawns a future on the executor.
-fn spawn<F, R>(future: F) -> async_task::JoinHandle<R, ()>
+fn spawn<F, R>(future: F) -> JoinHandle<R>
 where
     F: Future<Output = R> + Send + 'static,
     R: Send + 'static,
 {
     lazy_static! {
         // A channel that holds scheduled tasks.
-        static ref QUEUE: Sender<async_task::Task<()>> = {
-            let (sender, receiver) = unbounded::<async_task::Task<()>>();
+        static ref QUEUE: Sender<Task> = {
+            let (sender, receiver) = unbounded::<Task>();
 
             // Start the executor thread.
             thread::spawn(|| {
