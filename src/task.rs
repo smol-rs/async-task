@@ -19,6 +19,9 @@ use crate::JoinHandle;
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
 /// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
 ///
+/// The schedule function should not attempt to run the task nor to drop it. Instead, it should
+/// push the task into some kind of queue so that it can be processed later.
+///
 /// If you need to spawn a future that does not implement [`Send`], consider using the
 /// [`spawn_local`] function instead.
 ///
@@ -70,6 +73,9 @@ where
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
 /// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
+///
+/// The schedule function should not attempt to run the task nor to drop it. Instead, it should
+/// push the task into some kind of queue so that it can be processed later.
 ///
 /// Unlike [`spawn`], this function does not require the future to implement [`Send`]. If the
 /// [`Task`] reference is run or dropped on a thread it was not created on, a panic will occur.
