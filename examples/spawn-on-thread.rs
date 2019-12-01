@@ -7,10 +7,12 @@ use std::thread;
 use crossbeam::channel;
 use futures::executor;
 
+type JoinHandle<T> = async_task::JoinHandle<T, ()>;
+
 /// Spawns a future on a new dedicated thread.
 ///
 /// The returned handle can be used to await the output of the future.
-fn spawn_on_thread<F, R>(future: F) -> async_task::JoinHandle<R, ()>
+fn spawn_on_thread<F, R>(future: F) -> JoinHandle<R>
 where
     F: Future<Output = R> + Send + 'static,
     R: Send + 'static,

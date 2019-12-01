@@ -23,7 +23,7 @@
 //! # let (task, handle) = async_task::spawn(future, schedule, ());
 //! ```
 //!
-//! A task is constructed using the [`spawn`] function:
+//! A task is constructed using either [`spawn`] or [`spawn_local`]:
 //!
 //! ```
 //! # let (sender, receiver) = crossbeam::channel::unbounded();
@@ -93,6 +93,7 @@
 //! union of the future and its output.
 //!
 //! [`spawn`]: fn.spawn.html
+//! [`spawn_local`]: fn.spawn_local.html
 //! [`Task`]: struct.Task.html
 //! [`JoinHandle`]: struct.JoinHandle.html
 
@@ -108,4 +109,4 @@ mod task;
 mod utils;
 
 pub use crate::join_handle::JoinHandle;
-pub use crate::task::{spawn, Task};
+pub use crate::task::{spawn, spawn_local, Task};

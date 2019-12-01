@@ -11,6 +11,8 @@ use futures::executor;
 use futures::future::FutureExt;
 use lazy_static::lazy_static;
 
+type Task = async_task::Task<()>;
+
 /// Spawns a future on the executor.
 fn spawn<F, R>(future: F) -> JoinHandle<R>
 where
@@ -19,8 +21,8 @@ where
 {
     lazy_static! {
         // A channel that holds scheduled tasks.
-        static ref QUEUE: Sender<async_task::Task<()>> = {
-            let (sender, receiver) = unbounded::<async_task::Task<()>>();
+        static ref QUEUE: Sender<Task> = {
+            let (sender, receiver) = unbounded::<Task>();
 
             // Start the executor thread.
             thread::spawn(|| {

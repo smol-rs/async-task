@@ -1,8 +1,11 @@
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::mem;
+use std::mem::{self, ManuallyDrop};
+use std::pin::Pin;
 use std::ptr::NonNull;
+use std::task::{Context, Poll};
+use std::thread::{self, ThreadId};
 
 use crate::header::Header;
 use crate::raw::RawTask;
@@ -16,8 +19,16 @@ use crate::JoinHandle;
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
 /// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
 ///
+/// The schedule function should not attempt to run the task nor to drop it. Instead, it should
+/// push the task into some kind of queue so that it can be processed later.
+///
+/// If you need to spawn a future that does not implement [`Send`], consider using the
+/// [`spawn_local`] function instead.
+///
 /// [`Task`]: struct.Task.html
 /// [`JoinHandle`]: struct.JoinHandle.html
+/// [`Send`]: https://doc.rust-lang.org/std/marker/trait.Send.html
+/// [`spawn_local`]: fn.spawn_local.html
 ///
 /// # Examples
 ///
@@ -43,7 +54,98 @@ where
     S: Fn(Task<T>) + Send + Sync + 'static,
     T: Send + Sync + 'static,
 {
-    let raw_task = RawTask::<F, R, S, T>::allocate(tag, future, schedule);
+    let raw_task = RawTask::<F, R, S, T>::allocate(future, schedule, tag);
+    let task = Task {
+        raw_task,
+        _marker: PhantomData,
+    };
+    let handle = JoinHandle {
+        raw_task,
+        _marker: PhantomData,
+    };
+    (task, handle)
+}
+
+/// Creates a new local task.
+///
+/// This constructor returns a [`Task`] reference that runs the future and a [`JoinHandle`] that
+/// awaits its result.
+///
+/// When run, the task polls `future`. When woken up, it gets scheduled for running by the
+/// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
+///
+/// The schedule function should not attempt to run the task nor to drop it. Instead, it should
+/// push the task into some kind of queue so that it can be processed later.
+///
+/// Unlike [`spawn`], this function does not require the future to implement [`Send`]. If the
+/// [`Task`] reference is run or dropped on a thread it was not created on, a panic will occur.
+///
+/// [`Task`]: struct.Task.html
+/// [`JoinHandle`]: struct.JoinHandle.html
+/// [`spawn`]: fn.spawn.html
+/// [`Send`]: https://doc.rust-lang.org/std/marker/trait.Send.html
+///
+/// # Examples
+///
+/// ```
+/// use crossbeam::channel;
+///
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
+///
+/// // If the task gets woken up, it will be sent into this channel.
+/// let (s, r) = channel::unbounded();
+/// let schedule = move |task| s.send(task).unwrap();
+///
+/// // Create a task with the future and the schedule function.
+/// let (task, handle) = async_task::spawn_local(future, schedule, ());
+/// ```
+pub fn spawn_local<F, R, S, T>(future: F, schedule: S, tag: T) -> (Task<T>, JoinHandle<R, T>)
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    S: Fn(Task<T>) + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+{
+    thread_local! {
+        static ID: ThreadId = thread::current().id();
+    }
+
+    struct Checked<F> {
+        id: ThreadId,
+        inner: ManuallyDrop<F>,
+    }
+
+    impl<F> Drop for Checked<F> {
+        fn drop(&mut self) {
+            if ID.with(|id| *id) != self.id {
+                panic!("local task dropped by a thread that didn't spawn it");
+            }
+            unsafe {
+                ManuallyDrop::drop(&mut self.inner);
+            }
+        }
+    }
+
+    impl<F: Future> Future for Checked<F> {
+        type Output = F::Output;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if ID.with(|id| *id) != self.id {
+                panic!("local task polled by a thread that didn't spawn it");
+            }
+            unsafe { self.map_unchecked_mut(|c| &mut *c.inner).poll(cx) }
+        }
+    }
+
+    let future = Checked {
+        id: ID.with(|id| *id),
+        inner: ManuallyDrop::new(future),
+    };
+
+    let raw_task = RawTask::<_, R, S, T>::allocate(future, schedule, tag);
     let task = Task {
         raw_task,
         _marker: PhantomData,
