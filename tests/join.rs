@@ -126,7 +126,7 @@ fn ms(ms: u64) -> Duration {
 fn cancel_and_join() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     assert_eq!(DROP_O.load(), 0);
 
@@ -139,7 +139,7 @@ fn cancel_and_join() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(DROP_O.load(), 0);
 }
 
@@ -147,7 +147,7 @@ fn cancel_and_join() {
 fn run_and_join() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     assert_eq!(DROP_O.load(), 0);
 
@@ -159,7 +159,7 @@ fn run_and_join() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(DROP_O.load(), 1);
 }
 
@@ -167,7 +167,7 @@ fn run_and_join() {
 fn drop_handle_and_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     assert_eq!(DROP_O.load(), 0);
 
@@ -179,7 +179,7 @@ fn drop_handle_and_run() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(DROP_O.load(), 1);
 }
 
@@ -187,7 +187,7 @@ fn drop_handle_and_run() {
 fn join_twice() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_D);
+    task!(task, mut handle, f, s, DROP_T);
 
     assert_eq!(DROP_O.load(), 0);
 
@@ -199,7 +199,7 @@ fn join_twice() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(DROP_O.load(), 1);
 
     assert!(block_on(&mut handle).is_none());
@@ -207,19 +207,19 @@ fn join_twice() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(DROP_O.load(), 1);
 
     drop(handle);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn join_and_cancel() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -234,7 +234,7 @@ fn join_and_cancel() {
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_O.load(), 0);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         assert!(block_on(handle).is_none());
@@ -245,7 +245,7 @@ fn join_and_cancel() {
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_O.load(), 0);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_D.load(), 1);
+        assert_eq!(DROP_T.load(), 1);
     })
     .unwrap();
 }
@@ -254,7 +254,7 @@ fn join_and_cancel() {
 fn join_and_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -267,7 +267,7 @@ fn join_and_run() {
 
             thread::sleep(ms(100));
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         assert!(block_on(handle).is_some());
@@ -278,7 +278,7 @@ fn join_and_run() {
 
         thread::sleep(ms(100));
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_D.load(), 1);
+        assert_eq!(DROP_T.load(), 1);
     })
     .unwrap();
 }
@@ -287,7 +287,7 @@ fn join_and_run() {
 fn try_join_and_run_and_join() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_D);
+    task!(task, mut handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -300,7 +300,7 @@ fn try_join_and_run_and_join() {
 
             thread::sleep(ms(100));
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         block_on(future::select(&mut handle, future::ready(())));
@@ -308,7 +308,7 @@ fn try_join_and_run_and_join() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
         assert!(block_on(handle).is_some());
@@ -319,7 +319,7 @@ fn try_join_and_run_and_join() {
 
         thread::sleep(ms(100));
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_D.load(), 1);
+        assert_eq!(DROP_T.load(), 1);
     })
     .unwrap();
 }
@@ -328,7 +328,7 @@ fn try_join_and_run_and_join() {
 fn try_join_and_cancel_and_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_D);
+    task!(task, mut handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -339,7 +339,7 @@ fn try_join_and_cancel_and_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         block_on(future::select(&mut handle, future::ready(())));
@@ -347,7 +347,7 @@ fn try_join_and_cancel_and_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
         handle.cancel();
@@ -355,7 +355,7 @@ fn try_join_and_cancel_and_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
         drop(handle);
@@ -363,7 +363,7 @@ fn try_join_and_cancel_and_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
     })
     .unwrap();
@@ -373,7 +373,7 @@ fn try_join_and_cancel_and_run() {
 fn try_join_and_run_and_cancel() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_D);
+    task!(task, mut handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -384,7 +384,7 @@ fn try_join_and_run_and_cancel() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 0);
-            assert_eq!(DROP_D.load(), 0);
+            assert_eq!(DROP_T.load(), 0);
         });
 
         block_on(future::select(&mut handle, future::ready(())));
@@ -392,7 +392,7 @@ fn try_join_and_run_and_cancel() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
         thread::sleep(ms(400));
@@ -402,7 +402,7 @@ fn try_join_and_run_and_cancel() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
         drop(handle);
@@ -410,7 +410,7 @@ fn try_join_and_run_and_cancel() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_D.load(), 1);
+        assert_eq!(DROP_T.load(), 1);
         assert_eq!(DROP_O.load(), 1);
     })
     .unwrap();

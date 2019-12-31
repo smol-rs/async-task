@@ -109,132 +109,132 @@ macro_rules! task {
 fn cancel_and_drop_handle() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     task.cancel();
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     drop(handle);
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     drop(task);
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn run_and_drop_handle() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     drop(handle);
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn drop_handle_and_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     drop(handle);
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn cancel_and_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     handle.cancel();
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     drop(handle);
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     task.run();
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn run_and_cancel() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     handle.cancel();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     drop(handle);
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
@@ -309,4 +309,26 @@ fn schedule_counter() {
 
     assert_eq!(handle.tag().load(Ordering::SeqCst), 3);
     r.recv().unwrap();
+}
+
+#[test]
+fn drop_inside_schedule() {
+    struct DropGuard(AtomicUsize);
+    impl Drop for DropGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let guard = DropGuard(AtomicUsize::new(0));
+
+    let (task, _) = async_task::spawn(
+        async {},
+        move |task| {
+            assert_eq!(guard.0.load(Ordering::SeqCst), 0);
+            drop(task);
+            assert_eq!(guard.0.load(Ordering::SeqCst), 0);
+        },
+        (),
+    );
+    task.schedule();
 }

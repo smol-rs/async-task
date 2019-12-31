@@ -136,7 +136,7 @@ fn ms(ms: u64) -> Duration {
 fn wake() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(mut task, _, f, s, DROP_D);
+    task!(mut task, _, f, s, DROP_T);
 
     assert!(chan.is_empty());
 
@@ -145,7 +145,7 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake();
@@ -154,7 +154,7 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     task.run();
@@ -162,7 +162,7 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake();
@@ -170,7 +170,7 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -178,7 +178,7 @@ fn wake() {
 fn wake_by_ref() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(mut task, _, f, s, DROP_D);
+    task!(mut task, _, f, s, DROP_T);
 
     assert!(chan.is_empty());
 
@@ -187,7 +187,7 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake_by_ref();
@@ -196,7 +196,7 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     task.run();
@@ -204,7 +204,7 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake_by_ref();
@@ -212,7 +212,7 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -220,14 +220,14 @@ fn wake_by_ref() {
 fn clone() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(mut task, _, f, s, DROP_D);
+    task!(mut task, _, f, s, DROP_T);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     let w2 = waker().clone();
@@ -241,7 +241,7 @@ fn clone() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     w3.wake();
@@ -249,27 +249,27 @@ fn clone() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     drop(w2);
     drop(waker());
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn wake_cancelled() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, _, f, s, DROP_D);
+    task!(task, _, f, s, DROP_T);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     let w = waker();
@@ -280,7 +280,7 @@ fn wake_cancelled() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     w.wake();
@@ -288,7 +288,7 @@ fn wake_cancelled() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -296,7 +296,7 @@ fn wake_cancelled() {
 fn wake_completed() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, _, f, s, DROP_D);
+    task!(task, _, f, s, DROP_T);
 
     task.run();
     let w = waker();
@@ -304,7 +304,7 @@ fn wake_completed() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     w.wake();
@@ -313,7 +313,7 @@ fn wake_completed() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake();
@@ -321,6 +321,6 @@ fn wake_completed() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }

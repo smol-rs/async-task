@@ -16,7 +16,7 @@ use crate::Task;
 /// The vtable for a task.
 pub(crate) struct TaskVTable {
     /// The raw waker vtable.
-    pub(crate) raw_waker: RawWakerVTable,
+    pub(crate) raw_waker_vtable: RawWakerVTable,
 
     /// Schedules the task.
     pub(crate) schedule: unsafe fn(*const ()),
@@ -119,7 +119,7 @@ where
                 state: AtomicUsize::new(SCHEDULED | HANDLE | REFERENCE),
                 awaiter: Cell::new(None),
                 vtable: &TaskVTable {
-                    raw_waker: RawWakerVTable::new(
+                    raw_waker_vtable: RawWakerVTable::new(
                         Self::clone_waker,
                         Self::wake,
                         Self::wake_by_ref,
@@ -198,6 +198,14 @@ where
 
     /// Wakes a waker.
     unsafe fn wake(ptr: *const ()) {
+        // This is just an optimization. If the schedule function has captured variables, then
+        // we'll do less reference counting if we wake the waker by reference and then drop it.
+        if mem::size_of::<S>() > 0 {
+            Self::wake_by_ref(ptr);
+            Self::drop_waker(ptr);
+            return;
+        }
+
         let raw = Self::from_ptr(ptr);
 
         let mut state = (*raw.header).state.load(Ordering::Acquire);
@@ -238,13 +246,9 @@ where
                     Ok(_) => {
                         // If the task is not yet scheduled and isn't currently running, now is the
                         // time to schedule it.
-                        if state & (SCHEDULED | RUNNING) == 0 {
+                        if state & RUNNING == 0 {
                             // Schedule the task.
-                            let task = Task {
-                                raw_task: NonNull::new_unchecked(ptr as *mut ()),
-                                _marker: PhantomData,
-                            };
-                            (*raw.schedule)(task);
+                            Self::schedule(ptr);
                         } else {
                             // Drop the waker.
                             Self::drop_waker(ptr);
@@ -284,8 +288,8 @@ where
                     Err(s) => state = s,
                 }
             } else {
-                // If the task is not scheduled nor running, we'll need to schedule after waking.
-                let new = if state & (SCHEDULED | RUNNING) == 0 {
+                // If the task is not running, we can schedule right away.
+                let new = if state & RUNNING == 0 {
                     (state | SCHEDULED) + REFERENCE
                 } else {
                     state | SCHEDULED
@@ -299,14 +303,16 @@ where
                     Ordering::Acquire,
                 ) {
                     Ok(_) => {
-                        // If the task is not scheduled nor running, now is the time to schedule.
-                        if state & (SCHEDULED | RUNNING) == 0 {
+                        // If the task is not running, now is the time to schedule.
+                        if state & RUNNING == 0 {
                             // If the reference count overflowed, abort.
                             if state > isize::max_value() as usize {
                                 std::process::abort();
                             }
 
-                            // Schedule the task.
+                            // Schedule the task. There is no need to call `Self::schedule(ptr)`
+                            // because the schedule function cannot be destroyed while the waker is
+                            // still alive.
                             let task = Task {
                                 raw_task: NonNull::new_unchecked(ptr as *mut ()),
                                 _marker: PhantomData,
@@ -325,7 +331,7 @@ where
     /// Clones a waker.
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
         let raw = Self::from_ptr(ptr);
-        let raw_waker = &(*raw.header).vtable.raw_waker;
+        let raw_waker_vtable = &(*raw.header).vtable.raw_waker_vtable;
 
         // Increment the reference count. With any kind of reference-counted data structure,
         // relaxed ordering is appropriate when incrementing the counter.
@@ -336,7 +342,7 @@ where
             std::process::abort();
         }
 
-        RawWaker::new(ptr, raw_waker)
+        RawWaker::new(ptr, raw_waker_vtable)
     }
 
     /// Drops a waker.
@@ -360,7 +366,7 @@ where
                 (*raw.header)
                     .state
                     .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
-                ((*raw.header).vtable.schedule)(ptr);
+                Self::schedule(ptr);
             } else {
                 // Otherwise, destroy the task right away.
                 Self::destroy(ptr);
@@ -393,10 +399,18 @@ where
     unsafe fn schedule(ptr: *const ()) {
         let raw = Self::from_ptr(ptr);
 
-        (*raw.schedule)(Task {
+        // If the schedule function has captured variables, create a temporary waker that prevents
+        // the task from getting deallocated while the function is being invoked.
+        let _waker;
+        if mem::size_of::<S>() > 0 {
+            _waker = Waker::from_raw(Self::clone_waker(ptr));
+        }
+
+        let task = Task {
             raw_task: NonNull::new_unchecked(ptr as *mut ()),
             _marker: PhantomData,
-        });
+        };
+        (*raw.schedule)(task);
     }
 
     /// Drops the future inside a task.
@@ -448,7 +462,7 @@ where
         // Create a context from the raw task pointer and the vtable inside the its header.
         let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(
             ptr,
-            &(*raw.header).vtable.raw_waker,
+            &(*raw.header).vtable.raw_waker_vtable,
         )));
         let cx = &mut Context::from_waker(&waker);
 

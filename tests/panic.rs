@@ -116,7 +116,7 @@ fn ms(ms: u64) -> Duration {
 fn cancel_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -125,7 +125,7 @@ fn cancel_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         thread::sleep(ms(100));
@@ -135,14 +135,14 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
 
         drop(handle);
         assert_eq!(POLL.load(), 1);
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
     })
     .unwrap();
 }
@@ -151,56 +151,56 @@ fn cancel_during_run() {
 fn run_and_join() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     assert!(catch_unwind(|| task.run()).is_err());
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     assert!(block_on(handle).is_none());
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn try_join_and_run_and_join() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_D);
+    task!(task, mut handle, f, s, DROP_T);
 
     block_on(future::select(&mut handle, future::ready(())));
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     assert!(catch_unwind(|| task.run()).is_err());
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_D.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
 
     assert!(block_on(handle).is_none());
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_D.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn join_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -211,7 +211,7 @@ fn join_during_run() {
 
             thread::sleep(ms(100));
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         thread::sleep(ms(100));
@@ -223,7 +223,7 @@ fn join_during_run() {
 
         thread::sleep(ms(100));
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_D.load(), 1);
+        assert_eq!(DROP_T.load(), 1);
     })
     .unwrap();
 }
@@ -232,7 +232,7 @@ fn join_during_run() {
 fn try_join_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_D);
+    task!(task, mut handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -241,7 +241,7 @@ fn try_join_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         thread::sleep(ms(100));
@@ -251,7 +251,7 @@ fn try_join_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
         drop(handle);
     })
     .unwrap();
@@ -261,7 +261,7 @@ fn try_join_during_run() {
 fn drop_handle_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_D);
+    task!(task, handle, f, s, DROP_T);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -270,7 +270,7 @@ fn drop_handle_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_D.load(), 1);
+            assert_eq!(DROP_T.load(), 1);
         });
 
         thread::sleep(ms(100));
@@ -280,7 +280,7 @@ fn drop_handle_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_D.load(), 0);
+        assert_eq!(DROP_T.load(), 0);
     })
     .unwrap();
 }
