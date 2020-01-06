@@ -104,7 +104,7 @@ impl Header {
             // by a unique pinned reference.
             debug_assert!(state & REGISTERING == 0);
 
-            // If the state is being notified at this moment, just wake and return without
+            // If we're in the notifying state at this moment, just wake and return without
             // registering.
             if state & NOTIFYING != 0 {
                 waker.wake_by_ref();
