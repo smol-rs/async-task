@@ -48,10 +48,16 @@ pub(crate) const HANDLE: usize = 1 << 4;
 /// check that tells us if we need to wake anyone without acquiring the lock inside the task.
 pub(crate) const AWAITER: usize = 1 << 5;
 
-/// Set if the awaiter is locked.
+/// Set if an awaiter is being registered.
 ///
-/// This lock is acquired before a new awaiter is registered or the existing one is woken up.
-pub(crate) const LOCKED: usize = 1 << 6;
+/// This flag is set when `JoinHandle` is polled and we are registering a new awaiter.
+pub(crate) const REGISTERING: usize = 1 << 6;
+
+/// Set if the awaiter is being notified.
+///
+/// This flag is set when notifying the awaiter. If an awaiter is concurrently registered and
+/// notified, whichever side came first will take over the reposibility of resolving the race.
+pub(crate) const NOTIFYING: usize = 1 << 7;
 
 /// A single reference.
 ///
@@ -61,4 +67,4 @@ pub(crate) const LOCKED: usize = 1 << 6;
 ///
 /// Note that the reference counter only tracks the `Task` and `Waker`s. The `JoinHandle` is
 /// tracked separately by the `HANDLE` flag.
-pub(crate) const REFERENCE: usize = 1 << 7;
+pub(crate) const REFERENCE: usize = 1 << 8;

@@ -1,11 +1,10 @@
-use std::fmt;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::mem::{self, ManuallyDrop};
-use std::pin::Pin;
-use std::ptr::NonNull;
-use std::task::{Context, Poll};
-use std::thread::{self, ThreadId};
+use core::fmt;
+use core::future::Future;
+use core::marker::PhantomData;
+use core::mem::{self, ManuallyDrop};
+use core::pin::Pin;
+use core::ptr::NonNull;
+use core::task::{Context, Poll};
 
 use crate::header::Header;
 use crate::raw::RawTask;
@@ -109,20 +108,29 @@ where
     S: Fn(Task<T>) + Send + Sync + 'static,
     T: Send + Sync + 'static,
 {
-    thread_local! {
-        static ID: ThreadId = thread::current().id();
+    #[cfg(unix)]
+    #[inline]
+    fn thread_id() -> usize {
+        unsafe { libc::pthread_self() as usize }
+    }
+
+    #[cfg(windows)]
+    #[inline]
+    fn thread_id() -> usize {
+        unsafe { winapi::um::processthreadsapi::GetCurrentThreadId() as usize }
     }
 
     struct Checked<F> {
-        id: ThreadId,
+        id: usize,
         inner: ManuallyDrop<F>,
     }
 
     impl<F> Drop for Checked<F> {
         fn drop(&mut self) {
-            if ID.with(|id| *id) != self.id {
-                panic!("local task dropped by a thread that didn't spawn it");
-            }
+            assert!(
+                self.id == thread_id(),
+                "local task dropped by a thread that didn't spawn it"
+            );
             unsafe {
                 ManuallyDrop::drop(&mut self.inner);
             }
@@ -133,15 +141,16 @@ where
         type Output = F::Output;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            if ID.with(|id| *id) != self.id {
-                panic!("local task polled by a thread that didn't spawn it");
-            }
+            assert!(
+                self.id == thread_id(),
+                "local task polled by a thread that didn't spawn it"
+            );
             unsafe { self.map_unchecked_mut(|c| &mut *c.inner).poll(cx) }
         }
     }
 
     let future = Checked {
-        id: ID.with(|id| *id),
+        id: thread_id(),
         inner: ManuallyDrop::new(future),
     };
 

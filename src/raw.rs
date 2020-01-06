@@ -1,12 +1,12 @@
-use std::alloc::{self, Layout};
-use std::cell::Cell;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::mem::{self, ManuallyDrop};
-use std::pin::Pin;
-use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use alloc::alloc::Layout;
+use core::cell::UnsafeCell;
+use core::future::Future;
+use core::marker::PhantomData;
+use core::mem::{self, ManuallyDrop};
+use core::pin::Pin;
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::header::Header;
 use crate::state::*;
@@ -107,8 +107,8 @@ where
 
         unsafe {
             // Allocate enough space for the entire task.
-            let raw_task = match NonNull::new(alloc::alloc(task_layout.layout) as *mut ()) {
-                None => std::process::abort(),
+            let raw_task = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
+                None => libc::abort(),
                 Some(p) => p,
             };
 
@@ -117,7 +117,7 @@ where
             // Write the header as the first field of the task.
             (raw.header as *mut Header).write(Header {
                 state: AtomicUsize::new(SCHEDULED | HANDLE | REFERENCE),
-                awaiter: Cell::new(None),
+                awaiter: UnsafeCell::new(None),
                 vtable: &TaskVTable {
                     raw_waker_vtable: RawWakerVTable::new(
                         Self::clone_waker,
@@ -307,7 +307,7 @@ where
                         if state & RUNNING == 0 {
                             // If the reference count overflowed, abort.
                             if state > isize::max_value() as usize {
-                                std::process::abort();
+                                libc::abort();
                             }
 
                             // Schedule the task. There is no need to call `Self::schedule(ptr)`
@@ -339,7 +339,7 @@ where
 
         // If the reference count overflowed, abort.
         if state > isize::max_value() as usize {
-            std::process::abort();
+            libc::abort();
         }
 
         RawWaker::new(ptr, raw_waker_vtable)
@@ -449,7 +449,7 @@ where
         });
 
         // Finally, deallocate the memory reserved by the task.
-        alloc::dealloc(ptr as *mut u8, task_layout.layout);
+        alloc::alloc::dealloc(ptr as *mut u8, task_layout.layout);
     }
 
     /// Runs a task.
@@ -474,7 +474,7 @@ where
             if state & CLOSED != 0 {
                 // Notify the awaiter that the task has been closed.
                 if state & AWAITER != 0 {
-                    (*raw.header).notify();
+                    (*raw.header).notify(None);
                 }
 
                 // Drop the future.
@@ -542,7 +542,7 @@ where
 
                             // Notify the awaiter that the task has been completed.
                             if state & AWAITER != 0 {
-                                (*raw.header).notify();
+                                (*raw.header).notify(None);
                             }
 
                             // Drop the task reference.
@@ -649,7 +649,7 @@ where
 
                                 // Notify the awaiter that the task has been closed.
                                 if state & AWAITER != 0 {
-                                    (*raw.header).notify();
+                                    (*raw.header).notify(None);
                                 }
 
                                 // Drop the task reference.

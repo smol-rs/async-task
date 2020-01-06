@@ -97,9 +97,12 @@
 //! [`Task`]: struct.Task.html
 //! [`JoinHandle`]: struct.JoinHandle.html
 
+#![no_std]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![doc(test(attr(deny(rust_2018_idioms, warnings))))]
 #![doc(test(attr(allow(unused_extern_crates, unused_variables))))]
+
+extern crate alloc;
 
 mod header;
 mod join_handle;

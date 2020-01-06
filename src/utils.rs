@@ -1,5 +1,5 @@
-use std::alloc::Layout;
-use std::mem;
+use core::alloc::Layout;
+use core::mem;
 
 /// Calls a function and aborts if it panics.
 ///
@@ -10,7 +10,7 @@ pub(crate) fn abort_on_panic<T>(f: impl FnOnce() -> T) -> T {
 
     impl Drop for Bomb {
         fn drop(&mut self) {
-            std::process::abort();
+            unsafe { libc::abort() }
         }
     }
 
