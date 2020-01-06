@@ -35,6 +35,9 @@ pub(crate) struct TaskVTable {
 
     /// Runs the task.
     pub(crate) run: unsafe fn(*const ()),
+
+    /// Creates a new waker associated with the task.
+    pub(crate) clone_waker: unsafe fn(ptr: *const ()) -> RawWaker,
 }
 
 /// Memory layout of a task.
@@ -131,6 +134,7 @@ where
                     drop_task: Self::drop_task,
                     destroy: Self::destroy,
                     run: Self::run,
+                    clone_waker: Self::clone_waker,
                 },
             });
 

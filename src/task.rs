@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop};
 use core::pin::Pin;
 use core::ptr::NonNull;
-use core::task::{Context, Poll};
+use core::task::{Context, Poll, Waker};
 
 use crate::header::Header;
 use crate::raw::RawTask;
@@ -262,6 +262,41 @@ impl<T> Task<T> {
         unsafe {
             let raw = (ptr as *mut u8).add(offset) as *const T;
             &*raw
+        }
+    }
+
+    /// Converts this task into a raw pointer to the tag.
+    pub fn into_raw(self) -> *const T {
+        let offset = Header::offset_tag::<T>();
+        let ptr = self.raw_task.as_ptr();
+        mem::forget(self);
+
+        unsafe { (ptr as *mut u8).add(offset) as *const T }
+    }
+
+    /// Converts a raw pointer to the tag into a task.
+    ///
+    /// This method should only be used with raw pointers returned from [`into_raw`].
+    ///
+    /// [`into_raw`]: #method.into_raw
+    pub unsafe fn from_raw(raw: *const T) -> Task<T> {
+        let offset = Header::offset_tag::<T>();
+        let ptr = (raw as *mut u8).sub(offset) as *mut ();
+
+        Task {
+            raw_task: NonNull::new_unchecked(ptr),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns a waker associated with this task.
+    pub fn waker(&self) -> Waker {
+        let ptr = self.raw_task.as_ptr();
+        let header = ptr as *const Header;
+
+        unsafe {
+            let raw_waker = ((*header).vtable.clone_waker)(ptr);
+            Waker::from_raw(raw_waker)
         }
     }
 }

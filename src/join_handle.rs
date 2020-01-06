@@ -4,7 +4,7 @@ use core::marker::{PhantomData, Unpin};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
-use core::task::{Context, Poll};
+use core::task::{Context, Poll, Waker};
 
 use crate::header::Header;
 use crate::state::*;
@@ -90,6 +90,17 @@ impl<R, T> JoinHandle<R, T> {
         unsafe {
             let raw = (ptr as *mut u8).add(offset) as *const T;
             &*raw
+        }
+    }
+
+    /// Returns a waker associated with the task.
+    pub fn waker(&self) -> Waker {
+        let ptr = self.raw_task.as_ptr();
+        let header = ptr as *const Header;
+
+        unsafe {
+            let raw_waker = ((*header).vtable.clone_waker)(ptr);
+            Waker::from_raw(raw_waker)
         }
     }
 }

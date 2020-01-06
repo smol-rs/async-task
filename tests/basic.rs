@@ -332,3 +332,39 @@ fn drop_inside_schedule() {
     );
     task.schedule();
 }
+
+#[test]
+fn waker() {
+    let (s, r) = channel::unbounded();
+    let schedule = move |t| s.send(t).unwrap();
+    let (task, handle) = async_task::spawn(
+        future::poll_fn(|_| Poll::<()>::Pending),
+        schedule,
+        Box::new(0),
+    );
+
+    assert!(r.is_empty());
+    let w = task.waker();
+    task.run();
+    w.wake();
+
+    let task = r.recv().unwrap();
+    task.run();
+    handle.waker().wake();
+
+    r.recv().unwrap();
+}
+
+#[test]
+fn raw() {
+    let (task, _handle) = async_task::spawn(async {}, |_| panic!(), Box::new(AtomicUsize::new(7)));
+
+    let a = task.into_raw();
+    let task = unsafe {
+        (*a).fetch_add(1, Ordering::SeqCst);
+        Task::from_raw(a)
+    };
+
+    assert_eq!(task.tag().load(Ordering::SeqCst), 8);
+    task.run();
+}
