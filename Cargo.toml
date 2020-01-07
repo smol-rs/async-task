@@ -12,7 +12,7 @@ keywords = ["futures", "task", "executor", "spawn"]
 categories = ["asynchronous", "concurrency"]
 readme = "README.md"
 
-[dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2.66"
 
 [target.'cfg(windows)'.dependencies]

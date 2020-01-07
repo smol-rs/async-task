@@ -10,7 +10,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::header::Header;
 use crate::state::*;
-use crate::utils::{abort_on_panic, extend};
+use crate::utils::{abort, abort_on_panic, extend};
 use crate::Task;
 
 /// The vtable for a task.
@@ -111,7 +111,7 @@ where
         unsafe {
             // Allocate enough space for the entire task.
             let raw_task = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
-                None => libc::abort(),
+                None => abort(),
                 Some(p) => p,
             };
 
@@ -311,7 +311,7 @@ where
                         if state & RUNNING == 0 {
                             // If the reference count overflowed, abort.
                             if state > isize::max_value() as usize {
-                                libc::abort();
+                                abort();
                             }
 
                             // Schedule the task. There is no need to call `Self::schedule(ptr)`
@@ -343,7 +343,7 @@ where
 
         // If the reference count overflowed, abort.
         if state > isize::max_value() as usize {
-            libc::abort();
+            abort();
         }
 
         RawWaker::new(ptr, raw_waker_vtable)

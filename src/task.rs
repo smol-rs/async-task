@@ -101,6 +101,7 @@ where
 /// // Create a task with the future and the schedule function.
 /// let (task, handle) = async_task::spawn_local(future, schedule, ());
 /// ```
+#[cfg(any(unix, windows))]
 pub fn spawn_local<F, R, S, T>(future: F, schedule: S, tag: T) -> (Task<T>, JoinHandle<R, T>)
 where
     F: Future<Output = R> + 'static,

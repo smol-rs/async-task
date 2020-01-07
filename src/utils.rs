@@ -1,6 +1,22 @@
 use core::alloc::Layout;
 use core::mem;
 
+/// Aborts the process.
+///
+/// To abort, this function simply panics while panicking.
+pub(crate) fn abort() -> ! {
+    struct Panic;
+
+    impl Drop for Panic {
+        fn drop(&mut self) {
+            panic!("aborting the process");
+        }
+    }
+
+    let _panic = Panic;
+    panic!("aborting the process");
+}
+
 /// Calls a function and aborts if it panics.
 ///
 /// This is useful in unsafe code where we can't recover from panics.
@@ -10,7 +26,7 @@ pub(crate) fn abort_on_panic<T>(f: impl FnOnce() -> T) -> T {
 
     impl Drop for Bomb {
         fn drop(&mut self) {
-            unsafe { libc::abort() }
+            abort();
         }
     }
 
