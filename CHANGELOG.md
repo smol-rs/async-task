@@ -1,3 +1,7 @@
+# Version 1.2.1
+
+- Add the `no-std` category to the package.
+
 # Version 1.2.0
 
 - The crate is now marked with `#![no_std]`.
