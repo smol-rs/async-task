@@ -55,10 +55,6 @@ $ cargo add async-task
 
 [cargo-add]: https://github.com/killercup/cargo-edit
 
-## Safety
-This crate makes use of carefully checked `unsafe` blocks to construct an
-efficient timer implementation.
-
 ## Contributing
 Want to join us? Check out our ["Contributing" guide][contributing] and take a
 look at some of these issues:
