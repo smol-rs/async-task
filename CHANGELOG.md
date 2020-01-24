@@ -1,3 +1,7 @@
+# Version 1.3.0
+
+- Add `waker_fn`.
+
 # Version 1.2.1
 
 - Add the `no-std` category to the package.
