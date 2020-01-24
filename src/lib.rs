@@ -1,12 +1,10 @@
 //! Task abstraction for building executors.
 //!
+//! # Spawning
+//!
 //! To spawn a future onto an executor, we first need to allocate it on the heap and keep some
 //! state alongside it. The state indicates whether the future is ready for polling, waiting to be
 //! woken up, or completed. Such a future is called a *task*.
-//!
-//! This crate helps with task allocation and polling its future to completion.
-//!
-//! # Spawning
 //!
 //! All executors have some kind of queue that holds runnable tasks:
 //!
@@ -89,13 +87,31 @@
 //! Task construction incurs a single allocation that holds its state, the schedule function, and
 //! the future or the result of the future if completed.
 //!
-//! The layout of a task is equivalent to 4 words followed by the schedule function, and then by a
-//! union of the future and its output.
+//! The layout of a task is equivalent to 4 `usize`s followed by the schedule function, and then by
+//! a union of the future and its output.
+//!
+//! # Waking
+//!
+//! The handy [`waker_fn`] constructor converts any function into a [`Waker`]. Every time it is
+//! woken, the function gets called:
+//!
+//! ```
+//! let waker = async_task::waker_fn(|| println!("Wake!"));
+//!
+//! // Prints "Wake!" twice.
+//! waker.wake_by_ref();
+//! waker.wake_by_ref();
+//! ```
+//!
+//! This is useful for implementing single-future executors like [`block_on`].
 //!
 //! [`spawn`]: fn.spawn.html
 //! [`spawn_local`]: fn.spawn_local.html
+//! [`waker_fn`]: fn.waker_fn.html
 //! [`Task`]: struct.Task.html
 //! [`JoinHandle`]: struct.JoinHandle.html
+//! [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
+//! [`block_on`]: https://github.com/async-rs/async-task/blob/master/examples/block.rs
 
 #![no_std]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
@@ -110,6 +126,8 @@ mod raw;
 mod state;
 mod task;
 mod utils;
+mod waker_fn;
 
 pub use crate::join_handle::JoinHandle;
 pub use crate::task::{spawn, spawn_local, Task};
+pub use crate::waker_fn::waker_fn;

@@ -15,9 +15,6 @@ use crate::Task;
 
 /// The vtable for a task.
 pub(crate) struct TaskVTable {
-    /// The raw waker vtable.
-    pub(crate) raw_waker_vtable: RawWakerVTable,
-
     /// Schedules the task.
     pub(crate) schedule: unsafe fn(*const ()),
 
@@ -101,6 +98,13 @@ where
     F: Future<Output = R> + 'static,
     S: Fn(Task<T>) + Send + Sync + 'static,
 {
+    const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        Self::clone_waker,
+        Self::wake,
+        Self::wake_by_ref,
+        Self::drop_waker,
+    );
+
     /// Allocates a task with the given `future` and `schedule` function.
     ///
     /// It is assumed that initially only the `Task` reference and the `JoinHandle` exist.
@@ -122,12 +126,6 @@ where
                 state: AtomicUsize::new(SCHEDULED | HANDLE | REFERENCE),
                 awaiter: UnsafeCell::new(None),
                 vtable: &TaskVTable {
-                    raw_waker_vtable: RawWakerVTable::new(
-                        Self::clone_waker,
-                        Self::wake,
-                        Self::wake_by_ref,
-                        Self::drop_waker,
-                    ),
                     schedule: Self::schedule,
                     drop_future: Self::drop_future,
                     get_output: Self::get_output,
@@ -335,7 +333,6 @@ where
     /// Clones a waker.
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
         let raw = Self::from_ptr(ptr);
-        let raw_waker_vtable = &(*raw.header).vtable.raw_waker_vtable;
 
         // Increment the reference count. With any kind of reference-counted data structure,
         // relaxed ordering is appropriate when incrementing the counter.
@@ -346,7 +343,7 @@ where
             abort();
         }
 
-        RawWaker::new(ptr, raw_waker_vtable)
+        RawWaker::new(ptr, &Self::RAW_WAKER_VTABLE)
     }
 
     /// Drops a waker.
@@ -464,10 +461,7 @@ where
         let raw = Self::from_ptr(ptr);
 
         // Create a context from the raw task pointer and the vtable inside the its header.
-        let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(
-            ptr,
-            &(*raw.header).vtable.raw_waker_vtable,
-        )));
+        let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(ptr, &Self::RAW_WAKER_VTABLE)));
         let cx = &mut Context::from_waker(&waker);
 
         let mut state = (*raw.header).state.load(Ordering::Acquire);

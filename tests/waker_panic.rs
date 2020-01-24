@@ -39,7 +39,7 @@ macro_rules! future {
                 fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                     WAKER.store(Some(cx.waker().clone()));
                     $poll.fetch_add(1);
-                    thread::sleep(ms(200));
+                    thread::sleep(ms(400));
 
                     if self.0.get() {
                         panic!()
@@ -156,7 +156,7 @@ fn wake_during_run() {
             assert_eq!(chan.len(), 0);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         w.wake();
         drop(handle);
@@ -167,7 +167,7 @@ fn wake_during_run() {
         assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
-        thread::sleep(ms(200));
+        thread::sleep(ms(400));
 
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -202,7 +202,7 @@ fn cancel_during_run() {
             assert_eq!(chan.len(), 0);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         handle.cancel();
         assert_eq!(POLL.load(), 2);
@@ -220,7 +220,7 @@ fn cancel_during_run() {
         assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
-        thread::sleep(ms(200));
+        thread::sleep(ms(400));
 
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -255,7 +255,7 @@ fn wake_and_cancel_during_run() {
             assert_eq!(chan.len(), 0);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         w.wake();
         assert_eq!(POLL.load(), 2);
@@ -281,7 +281,7 @@ fn wake_and_cancel_during_run() {
         assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
-        thread::sleep(ms(200));
+        thread::sleep(ms(400));
 
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -316,7 +316,7 @@ fn cancel_and_wake_during_run() {
             assert_eq!(chan.len(), 0);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         handle.cancel();
         assert_eq!(POLL.load(), 2);
@@ -342,7 +342,7 @@ fn cancel_and_wake_during_run() {
         assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
-        thread::sleep(ms(200));
+        thread::sleep(ms(400));
 
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);

@@ -34,7 +34,7 @@ macro_rules! future {
 
                 fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
                     $poll.fetch_add(1);
-                    thread::sleep(ms(200));
+                    thread::sleep(ms(400));
                     Poll::Ready(Out(Box::new(0)))
                 }
             }
@@ -138,7 +138,7 @@ fn cancel_during_run() {
             assert_eq!(DROP_O.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         handle.cancel();
         assert_eq!(POLL.load(), 1);
@@ -148,7 +148,7 @@ fn cancel_during_run() {
         assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
-        thread::sleep(ms(200));
+        thread::sleep(ms(400));
 
         assert_eq!(POLL.load(), 1);
         assert_eq!(SCHEDULE.load(), 0);
@@ -181,12 +181,12 @@ fn join_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
 
-            thread::sleep(ms(100));
+            thread::sleep(ms(200));
             assert_eq!(DROP_S.load(), 1);
             assert_eq!(DROP_T.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         assert!(block_on(handle).is_some());
         assert_eq!(POLL.load(), 1);
@@ -194,7 +194,7 @@ fn join_during_run() {
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_O.load(), 1);
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
         assert_eq!(DROP_S.load(), 1);
         assert_eq!(DROP_T.load(), 1);
     })
@@ -218,7 +218,7 @@ fn try_join_during_run() {
             assert_eq!(DROP_O.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         block_on(future::select(&mut handle, future::ready(())));
         assert_eq!(POLL.load(), 1);
@@ -249,7 +249,7 @@ fn drop_handle_during_run() {
             assert_eq!(DROP_O.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         drop(handle);
         assert_eq!(POLL.load(), 1);

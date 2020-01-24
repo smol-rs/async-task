@@ -223,12 +223,12 @@ fn join_and_cancel() {
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
-            thread::sleep(ms(100));
+            thread::sleep(ms(200));
 
             task.cancel();
             drop(task);
 
-            thread::sleep(ms(200));
+            thread::sleep(ms(400));
             assert_eq!(POLL.load(), 0);
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
@@ -241,7 +241,7 @@ fn join_and_cancel() {
         assert_eq!(POLL.load(), 0);
         assert_eq!(SCHEDULE.load(), 0);
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_O.load(), 0);
         assert_eq!(DROP_S.load(), 1);
@@ -258,14 +258,14 @@ fn join_and_run() {
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
-            thread::sleep(ms(200));
+            thread::sleep(ms(400));
 
             task.run();
             assert_eq!(POLL.load(), 1);
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
 
-            thread::sleep(ms(100));
+            thread::sleep(ms(200));
             assert_eq!(DROP_S.load(), 1);
             assert_eq!(DROP_T.load(), 1);
         });
@@ -276,7 +276,7 @@ fn join_and_run() {
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_O.load(), 1);
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
         assert_eq!(DROP_S.load(), 1);
         assert_eq!(DROP_T.load(), 1);
     })
@@ -291,14 +291,14 @@ fn try_join_and_run_and_join() {
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
-            thread::sleep(ms(200));
+            thread::sleep(ms(400));
 
             task.run();
             assert_eq!(POLL.load(), 1);
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
 
-            thread::sleep(ms(100));
+            thread::sleep(ms(200));
             assert_eq!(DROP_S.load(), 1);
             assert_eq!(DROP_T.load(), 1);
         });
@@ -317,7 +317,7 @@ fn try_join_and_run_and_join() {
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_O.load(), 1);
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
         assert_eq!(DROP_S.load(), 1);
         assert_eq!(DROP_T.load(), 1);
     })
@@ -332,7 +332,7 @@ fn try_join_and_cancel_and_run() {
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
-            thread::sleep(ms(200));
+            thread::sleep(ms(400));
 
             task.run();
             assert_eq!(POLL.load(), 0);

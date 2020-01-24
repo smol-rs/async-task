@@ -33,7 +33,7 @@ macro_rules! future {
 
                 fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
                     $poll.fetch_add(1);
-                    thread::sleep(ms(200));
+                    thread::sleep(ms(400));
                     panic!()
                 }
             }
@@ -128,7 +128,7 @@ fn cancel_during_run() {
             assert_eq!(DROP_T.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         handle.cancel();
         assert_eq!(POLL.load(), 1);
@@ -209,19 +209,19 @@ fn join_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
 
-            thread::sleep(ms(100));
+            thread::sleep(ms(200));
             assert_eq!(DROP_S.load(), 1);
             assert_eq!(DROP_T.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         assert!(block_on(handle).is_none());
         assert_eq!(POLL.load(), 1);
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 1);
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
         assert_eq!(DROP_S.load(), 1);
         assert_eq!(DROP_T.load(), 1);
     })
@@ -244,7 +244,7 @@ fn try_join_during_run() {
             assert_eq!(DROP_T.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         block_on(future::select(&mut handle, future::ready(())));
         assert_eq!(POLL.load(), 1);
@@ -273,7 +273,7 @@ fn drop_handle_during_run() {
             assert_eq!(DROP_T.load(), 1);
         });
 
-        thread::sleep(ms(100));
+        thread::sleep(ms(200));
 
         drop(handle);
         assert_eq!(POLL.load(), 1);
