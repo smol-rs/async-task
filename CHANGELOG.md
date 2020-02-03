@@ -1,3 +1,7 @@
+# Version 1.3.1
+
+- Make `spawn_local` available only on unix and windows.
+
 # Version 1.3.0
 
 - Add `waker_fn`.
