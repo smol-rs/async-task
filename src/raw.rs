@@ -83,13 +83,7 @@ impl<F, R, S, T> Copy for RawTask<F, R, S, T> {}
 
 impl<F, R, S, T> Clone for RawTask<F, R, S, T> {
     fn clone(&self) -> Self {
-        Self {
-            header: self.header,
-            schedule: self.schedule,
-            tag: self.tag,
-            future: self.future,
-            output: self.output,
-        }
+        *self
     }
 }
 
