@@ -31,7 +31,7 @@ pub(crate) struct TaskVTable {
     pub(crate) destroy: unsafe fn(*const ()),
 
     /// Runs the task.
-    pub(crate) run: unsafe fn(*const ()),
+    pub(crate) run: unsafe fn(*const ()) -> bool,
 
     /// Creates a new waker associated with the task.
     pub(crate) clone_waker: unsafe fn(ptr: *const ()) -> RawWaker,
@@ -457,7 +457,7 @@ where
     ///
     /// If polling its future panics, the task will be closed and the panic will be propagated into
     /// the caller.
-    unsafe fn run(ptr: *const ()) {
+    unsafe fn run(ptr: *const ()) -> bool {
         let raw = Self::from_ptr(ptr);
 
         // Create a context from the raw task pointer and the vtable inside the its header.
@@ -480,7 +480,7 @@ where
 
                 // Drop the task reference.
                 Self::drop_task(ptr);
-                return;
+                return false;
             }
 
             // Mark the task as unscheduled and running.
@@ -587,6 +587,7 @@ where
                                 // The thread that woke the task up didn't reschedule it because
                                 // it was running so now it's our responsibility to do so.
                                 Self::schedule(ptr);
+                                return true;
                             } else {
                                 // Drop the task reference.
                                 Self::drop_task(ptr);
@@ -598,6 +599,8 @@ where
                 }
             }
         }
+
+        return false;
 
         /// A guard that closes the task if polling its future panics.
         struct Guard<F, R, S, T>(RawTask<F, R, S, T>)

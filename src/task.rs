@@ -217,6 +217,9 @@ impl<T> Task<T> {
 
     /// Runs the task.
     ///
+    /// Returns `true` if the task was woken while running, in which case it gets rescheduled at
+    /// the end of this method invocation.
+    ///
     /// This method polls the task's future. If the future completes, its result will become
     /// available to the [`JoinHandle`]. And if the future is still pending, the task will have to
     /// be woken up in order to be rescheduled and run again.
@@ -230,13 +233,13 @@ impl<T> Task<T> {
     ///
     /// [`JoinHandle`]: struct.JoinHandle.html
     /// [`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
-    pub fn run(self) {
+    pub fn run(self) -> bool {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
         mem::forget(self);
 
         unsafe {
-            ((*header).vtable.run)(ptr);
+            ((*header).vtable.run)(ptr)
         }
     }
 
