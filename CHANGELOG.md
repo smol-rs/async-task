@@ -1,3 +1,7 @@
+# Version 2.0.0
+
+- Return `true` in `Task::run()`.
+
 # Version 1.3.1
 
 - Make `spawn_local` available only on unix and windows.

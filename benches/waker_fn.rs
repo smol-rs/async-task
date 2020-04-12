@@ -13,7 +13,7 @@ use test::Bencher;
 /// Runs a future to completion on the current thread.
 fn block_on<F: Future>(future: F) -> F::Output {
     // Pin the future on the stack.
-    pin_utils::pin_mut!(future);
+    futures::pin_mut!(future);
 
     thread_local! {
         // Parker and waker associated with the current thread.
