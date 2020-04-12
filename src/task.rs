@@ -238,9 +238,7 @@ impl<T> Task<T> {
         let header = ptr as *const Header;
         mem::forget(self);
 
-        unsafe {
-            ((*header).vtable.run)(ptr)
-        }
+        unsafe { ((*header).vtable.run)(ptr) }
     }
 
     /// Cancels the task.
