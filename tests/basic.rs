@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use async_task::Task;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel;
-use futures::future;
+use futures::future::{self, FutureExt};
 use lazy_static::lazy_static;
 
 // Creates a future with event counters.
@@ -231,6 +231,44 @@ fn run_and_cancel() {
 
     drop(handle);
     assert_eq!(POLL.load(), 1);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(DROP_T.load(), 1);
+}
+
+#[test]
+fn cancel_and_poll() {
+    future!(f, POLL, DROP_F);
+    schedule!(s, SCHEDULE, DROP_S);
+    task!(task, handle, f, s, DROP_T);
+
+    handle.cancel();
+    assert_eq!(POLL.load(), 0);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
+
+    let mut handle = handle;
+    assert!((&mut handle).now_or_never().is_none());
+
+    task.run();
+    assert_eq!(POLL.load(), 0);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
+
+    assert!((&mut handle).now_or_never().is_some());
+    assert_eq!(POLL.load(), 0);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(DROP_T.load(), 0);
+
+    drop(handle);
+    assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);

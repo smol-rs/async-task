@@ -4,10 +4,12 @@ use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop};
 use core::pin::Pin;
 use core::ptr::NonNull;
+use core::sync::atomic::Ordering;
 use core::task::{Context, Poll, Waker};
 
 use crate::header::Header;
 use crate::raw::RawTask;
+use crate::state::*;
 use crate::JoinHandle;
 
 /// Creates a new task.
@@ -314,6 +316,14 @@ impl<T> Drop for Task<T> {
 
             // Drop the future.
             ((*header).vtable.drop_future)(ptr);
+
+            // Mark the task as unscheduled.
+            let state = (*header).state.fetch_and(!SCHEDULED, Ordering::AcqRel);
+
+            // Notify the awaiter that the future has been dropped.
+            if state & AWAITER != 0 {
+                (*header).notify(None);
+            }
 
             // Drop the task reference.
             ((*header).vtable.drop_task)(ptr);

@@ -32,8 +32,8 @@ pub(crate) struct Header {
 impl Header {
     /// Cancels the task.
     ///
-    /// This method will mark the task as closed and notify the awaiter, but it won't reschedule
-    /// the task if it's not completed.
+    /// This method will mark the task as closed, but it won't reschedule the task or drop its
+    /// future.
     pub(crate) fn cancel(&self) {
         let mut state = self.state.load(Ordering::Acquire);
 
@@ -50,14 +50,7 @@ impl Header {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => {
-                    // Notify the awaiter that the task has been closed.
-                    if state & AWAITER != 0 {
-                        self.notify(None);
-                    }
-
-                    break;
-                }
+                Ok(_) => break,
                 Err(s) => state = s,
             }
         }
@@ -107,7 +100,7 @@ impl Header {
             // If we're in the notifying state at this moment, just wake and return without
             // registering.
             if state & NOTIFYING != 0 {
-                waker.wake_by_ref();
+                abort_on_panic(|| waker.wake_by_ref());
                 return;
             }
 
@@ -139,7 +132,7 @@ impl Header {
             // If there was a notification, take the waker out of the awaiter field.
             if state & NOTIFYING != 0 {
                 if let Some(w) = unsafe { (*self.awaiter.get()).take() } {
-                    waker = Some(w);
+                    abort_on_panic(|| waker = Some(w));
                 }
             }
 
