@@ -1,3 +1,7 @@
+# Version 2.1.1
+
+- Allocate large futures on the heap.
+
 # Version 2.1.0
 
 - `JoinHandle` now only evaluates after the task's future has been dropped.
