@@ -55,7 +55,14 @@ where
     S: Fn(Task<T>) + Send + Sync + 'static,
     T: Send + Sync + 'static,
 {
-    let raw_task = RawTask::<F, R, S, T>::allocate(future, schedule, tag);
+    // Allocate large futures on the heap.
+    let raw_task = if mem::size_of::<F>() >= 2048 {
+        let future = alloc::boxed::Box::pin(future);
+        RawTask::<_, R, S, T>::allocate(future, schedule, tag)
+    } else {
+        RawTask::<F, R, S, T>::allocate(future, schedule, tag)
+    };
+
     let task = Task {
         raw_task,
         _marker: PhantomData,
@@ -152,12 +159,20 @@ where
         }
     }
 
+    // Wrap the future into one that which thread it's on.
     let future = Checked {
         id: thread_id(),
         inner: ManuallyDrop::new(future),
     };
 
-    let raw_task = RawTask::<_, R, S, T>::allocate(future, schedule, tag);
+    // Allocate large futures on the heap.
+    let raw_task = if mem::size_of::<F>() >= 2048 {
+        let future = alloc::boxed::Box::pin(future);
+        RawTask::<_, R, S, T>::allocate(future, schedule, tag)
+    } else {
+        RawTask::<_, R, S, T>::allocate(future, schedule, tag)
+    };
+
     let task = Task {
         raw_task,
         _marker: PhantomData,
