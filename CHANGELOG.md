@@ -1,6 +1,6 @@
 # Version 2.1.0
 
-- Stronger gua
+- `JoinHandle` now only evaluates after the task's future has been dropped.
 
 # Version 2.0.0
 
