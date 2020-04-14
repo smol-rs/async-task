@@ -56,7 +56,7 @@ fn main() {
 
     // Block on the future and report its result.
     match executor::block_on(handle) {
-        None => println!("The task was cancelled."),
+        None => println!("The task was canceled."),
         Some(Ok(val)) => println!("The task completed with {:?}", val),
         Some(Err(_)) => println!("The task has panicked"),
     }
@@ -68,7 +68,7 @@ fn main() {
 
     // Block on the future and report its result.
     match executor::block_on(handle) {
-        None => println!("The task was cancelled."),
+        None => println!("The task was canceled."),
         Some(Ok(val)) => println!("The task completed with {:?}", val),
         Some(Err(_)) => println!("The task has panicked"),
     }

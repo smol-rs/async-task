@@ -259,7 +259,7 @@ fn clone() {
 }
 
 #[test]
-fn wake_cancelled() {
+fn wake_canceled() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
     task!(task, _, f, s, DROP_T);

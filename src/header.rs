@@ -38,7 +38,7 @@ impl Header {
         let mut state = self.state.load(Ordering::Acquire);
 
         loop {
-            // If the task has been completed or closed, it can't be cancelled.
+            // If the task has been completed or closed, it can't be canceled.
             if state & (COMPLETED | CLOSED) != 0 {
                 break;
             }

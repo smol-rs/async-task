@@ -13,7 +13,7 @@ use crate::state::*;
 ///
 /// This type is a future that resolves to an `Option<R>` where:
 ///
-/// * `None` indicates the task has panicked or was cancelled.
+/// * `None` indicates the task has panicked or was canceled.
 /// * `Some(result)` indicates the task has completed with `result` of type `R`.
 pub struct JoinHandle<R, T> {
     /// A raw task pointer.
@@ -33,7 +33,7 @@ impl<R, T> JoinHandle<R, T> {
     ///
     /// If the task has already completed, calling this method will have no effect.
     ///
-    /// When a task is cancelled, its future will not be polled again.
+    /// When a task is canceled, its future will not be polled again.
     pub fn cancel(&self) {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -42,7 +42,7 @@ impl<R, T> JoinHandle<R, T> {
             let mut state = (*header).state.load(Ordering::Acquire);
 
             loop {
-                // If the task has been completed or closed, it can't be cancelled.
+                // If the task has been completed or closed, it can't be canceled.
                 if state & (COMPLETED | CLOSED) != 0 {
                     break;
                 }

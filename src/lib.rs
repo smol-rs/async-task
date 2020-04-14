@@ -73,14 +73,17 @@
 //! it's waiting for another future and needs to go to sleep. When woken up, its schedule function
 //! will be invoked, pushing it back into the queue so that it can be run again.
 //!
-//! # Cancellation
+//! # Cancelation
 //!
-//! Both [`Task`] and [`JoinHandle`] have methods that cancel the task. When cancelled, the task's
+//! Both [`Task`] and [`JoinHandle`] have methods that cancel the task. When canceled, the task's
 //! future will not be polled again and will get dropped instead.
 //!
-//! If cancelled by the [`Task`] instance, the task is destroyed immediately. If cancelled by the
+//! If canceled by the [`Task`] instance, the task is destroyed immediately. If canceled by the
 //! [`JoinHandle`] instance, it will be scheduled one more time and the next attempt to run it will
 //! simply destroy it.
+//!
+//! The `JoinHandle` future will then evaluate to `None`, but only after the task's future is
+//! dropped.
 //!
 //! # Performance
 //!

@@ -1,3 +1,7 @@
+# Version 2.1.0
+
+- Stronger gua
+
 # Version 2.0.0
 
 - Return `true` in `Task::run()`.
@@ -26,7 +30,7 @@
 
 # Version 1.1.0
 
-- If a task is dropped or cancelled outside the `run` method, it gets re-scheduled.
+- If a task is dropped or canceled outside the `run` method, it gets re-scheduled.
 - Add `spawn_local` constructor.
 
 # Version 1.0.0

@@ -180,8 +180,8 @@ where
 /// function. In most executors, scheduling simply pushes the [`Task`] reference into a queue of
 /// runnable tasks.
 ///
-/// If the [`Task`] reference is dropped without getting run, the task is automatically cancelled.
-/// When cancelled, the task won't be scheduled again even if a [`Waker`] wakes it. It is possible
+/// If the [`Task`] reference is dropped without getting run, the task is automatically canceled.
+/// When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. It is possible
 /// for the [`JoinHandle`] to cancel while the [`Task`] reference exists, in which case an attempt
 /// to run the task won't do anything.
 ///
@@ -206,7 +206,7 @@ impl<T> Task<T> {
     /// This is a convenience method that simply reschedules the task by passing it to its schedule
     /// function.
     ///
-    /// If the task is cancelled, this method won't do anything.
+    /// If the task is canceled, this method won't do anything.
     pub fn schedule(self) {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -226,12 +226,12 @@ impl<T> Task<T> {
     /// available to the [`JoinHandle`]. And if the future is still pending, the task will have to
     /// be woken up in order to be rescheduled and run again.
     ///
-    /// If the task was cancelled by a [`JoinHandle`] before it gets run, then this method won't do
+    /// If the task was canceled by a [`JoinHandle`] before it gets run, then this method won't do
     /// anything.
     ///
     /// It is possible that polling the future panics, in which case the panic will be propagated
     /// into the caller. It is advised that invocations of this method are wrapped inside
-    /// [`catch_unwind`]. If a panic occurs, the task is automatically cancelled.
+    /// [`catch_unwind`]. If a panic occurs, the task is automatically canceled.
     ///
     /// [`JoinHandle`]: struct.JoinHandle.html
     /// [`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
@@ -245,7 +245,7 @@ impl<T> Task<T> {
 
     /// Cancels the task.
     ///
-    /// When cancelled, the task won't be scheduled again even if a [`Waker`] wakes it. An attempt
+    /// When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. An attempt
     /// to run it won't do anything.
     ///
     /// [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html

@@ -26,10 +26,10 @@ pub(crate) const COMPLETED: usize = 1 << 2;
 
 /// Set if the task is closed.
 ///
-/// If a task is closed, that means it's either cancelled or its output has been consumed by the
+/// If a task is closed, that means it's either canceled or its output has been consumed by the
 /// `JoinHandle`. A task becomes closed when:
 ///
-/// 1. It gets cancelled by `Task::cancel()`, `Task::drop()`, or `JoinHandle::cancel()`.
+/// 1. It gets canceled by `Task::cancel()`, `Task::drop()`, or `JoinHandle::cancel()`.
 /// 2. Its output gets awaited by the `JoinHandle`.
 /// 3. It panics while polling the future.
 /// 4. It is completed and the `JoinHandle` gets dropped.
