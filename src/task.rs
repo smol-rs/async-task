@@ -1,11 +1,10 @@
 use core::fmt;
 use core::future::Future;
 use core::marker::PhantomData;
-use core::mem::{self, ManuallyDrop};
-use core::pin::Pin;
+use core::mem;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
-use core::task::{Context, Poll, Waker};
+use core::task::Waker;
 
 use crate::header::Header;
 use crate::raw::RawTask;
@@ -88,6 +87,9 @@ where
 /// Unlike [`spawn`], this function does not require the future to implement [`Send`]. If the
 /// [`Task`] reference is run or dropped on a thread it was not created on, a panic will occur.
 ///
+/// **NOTE:** This function is only available when the `std` feature for this crate is enabled (it
+/// is by default).
+///
 /// [`Task`]: struct.Task.html
 /// [`JoinHandle`]: struct.JoinHandle.html
 /// [`spawn`]: fn.spawn.html
@@ -110,7 +112,7 @@ where
 /// // Create a task with the future and the schedule function.
 /// let (task, handle) = async_task::spawn_local(future, schedule, ());
 /// ```
-#[cfg(any(unix, windows))]
+#[cfg(feature = "std")]
 pub fn spawn_local<F, R, S, T>(future: F, schedule: S, tag: T) -> (Task<T>, JoinHandle<R, T>)
 where
     F: Future<Output = R> + 'static,
@@ -118,20 +120,25 @@ where
     S: Fn(Task<T>) + Send + Sync + 'static,
     T: Send + Sync + 'static,
 {
-    #[cfg(unix)]
-    #[inline]
-    fn thread_id() -> usize {
-        unsafe { libc::pthread_self() as usize }
-    }
+    extern crate std;
 
-    #[cfg(windows)]
+    use std::mem::ManuallyDrop;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::thread::{self, ThreadId};
+    use std::thread_local;
+
     #[inline]
-    fn thread_id() -> usize {
-        unsafe { winapi::um::processthreadsapi::GetCurrentThreadId() as usize }
+    fn thread_id() -> ThreadId {
+        thread_local! {
+            static ID: ThreadId = thread::current().id();
+        }
+        ID.try_with(|id| *id)
+            .unwrap_or_else(|_| thread::current().id())
     }
 
     struct Checked<F> {
-        id: usize,
+        id: ThreadId,
         inner: ManuallyDrop<F>,
     }
 

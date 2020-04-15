@@ -135,5 +135,5 @@ pub use crate::join_handle::JoinHandle;
 pub use crate::task::{spawn, Task};
 pub use crate::waker_fn::waker_fn;
 
-#[cfg(any(unix, windows))]
+#[cfg(feature = "std")]
 pub use crate::task::spawn_local;

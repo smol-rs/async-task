@@ -12,11 +12,9 @@ keywords = ["futures", "task", "executor", "spawn"]
 categories = ["asynchronous", "concurrency", "no-std"]
 readme = "README.md"
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2.68"
-
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.8", features = ["processthreadsapi"] }
+[features]
+default = ["std"]
+std = []
 
 [dev-dependencies]
 crossbeam = "0.7.3"

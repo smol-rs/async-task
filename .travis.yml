@@ -23,3 +23,4 @@ script:
   - cargo fmt --all -- --check
   - cargo check --benches --bins --examples --tests
   - cargo test -- --test-threads=1
+  - cargo check --no-default-features
