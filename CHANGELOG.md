@@ -1,3 +1,8 @@
+# Version 3.0.0
+
+- Use `ThreadId` in `spawn_local` because OS-provided IDs can get recycled.
+- Add `std` feature to `Cargo.toml`.
+
 # Version 2.1.1
 
 - Allocate large futures on the heap.
