@@ -45,7 +45,7 @@ pub(crate) const HANDLE: usize = 1 << 4;
 ///
 /// This flag is set while there is a registered awaiter of type `Waker` inside the task. When the
 /// task gets closed or completed, we need to wake the awaiter. This flag can be used as a fast
-/// check that tells us if we need to wake anyone without acquiring the lock inside the task.
+/// check that tells us if we need to wake anyone.
 pub(crate) const AWAITER: usize = 1 << 5;
 
 /// Set if an awaiter is being registered.

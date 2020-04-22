@@ -18,6 +18,5 @@ std = []
 
 [dev-dependencies]
 crossbeam = "0.7.3"
-crossbeam-utils = "0.7.2"
 futures = "0.3.4"
 lazy_static = "1.4.0"
