@@ -73,7 +73,7 @@
 //! it's waiting for another future and needs to go to sleep. When woken up, its schedule function
 //! will be invoked, pushing it back into the queue so that it can be run again.
 //!
-//! # Cancelation
+//! # Cancellation
 //!
 //! Both [`Task`] and [`JoinHandle`] have methods that cancel the task. When canceled, the task's
 //! future will not be polled again and will get dropped instead.
