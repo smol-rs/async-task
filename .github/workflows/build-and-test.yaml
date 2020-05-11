@@ -39,7 +39,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --all --benches --bins --examples --tests --all-features
+          args: --all --bins --examples --tests --all-features
 
       - name: Run cargo check (no_std)
         uses: actions-rs/cargo@v1
