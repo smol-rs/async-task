@@ -45,7 +45,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --all --benches --bins --examples --tests --no-default-features
+          args: --all --no-default-features
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
