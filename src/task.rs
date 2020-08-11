@@ -117,8 +117,8 @@ pub fn spawn_local<F, R, S, T>(future: F, schedule: S, tag: T) -> (Task<T>, Join
 where
     F: Future<Output = R> + 'static,
     R: 'static,
-    S: Fn(Task<T>) + Send + Sync + 'static,
-    T: Send + Sync + 'static,
+    S: Fn(Task<T>) + 'static,
+    T: 'static,
 {
     extern crate std;
 

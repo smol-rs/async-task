@@ -90,7 +90,7 @@ impl<F, R, S, T> Clone for RawTask<F, R, S, T> {
 impl<F, R, S, T> RawTask<F, R, S, T>
 where
     F: Future<Output = R> + 'static,
-    S: Fn(Task<T>) + Send + Sync + 'static,
+    S: Fn(Task<T>) + 'static,
 {
     const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
@@ -612,12 +612,12 @@ where
         struct Guard<F, R, S, T>(RawTask<F, R, S, T>)
         where
             F: Future<Output = R> + 'static,
-            S: Fn(Task<T>) + Send + Sync + 'static;
+            S: Fn(Task<T>) + 'static;
 
         impl<F, R, S, T> Drop for Guard<F, R, S, T>
         where
             F: Future<Output = R> + 'static,
-            S: Fn(Task<T>) + Send + Sync + 'static,
+            S: Fn(Task<T>) + 'static,
         {
             fn drop(&mut self) {
                 let raw = self.0;
