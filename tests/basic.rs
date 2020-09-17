@@ -290,16 +290,17 @@ fn drop_inside_schedule() {
 fn waker() {
     let (s, r) = channel::unbounded();
     let schedule = move |t| s.send(t).unwrap();
-    let (task, handle) = async_task::spawn(future::poll_fn(|_| Poll::<()>::Pending), schedule);
+    let (task, _handle) = async_task::spawn(future::poll_fn(|_| Poll::<()>::Pending), schedule);
 
     assert!(r.is_empty());
     let w = task.waker();
     task.run();
-    w.wake();
+    w.wake_by_ref();
 
     let task = r.recv().unwrap();
     task.run();
-    assert!(r.is_empty());
+    w.wake();
+    r.recv().unwrap();
 }
 
 #[test]
