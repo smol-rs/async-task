@@ -10,14 +10,14 @@ use test::Bencher;
 #[bench]
 fn task_create(b: &mut Bencher) {
     b.iter(|| {
-        async_task::spawn(async {}, drop, ());
+        async_task::spawn(async {}, drop);
     });
 }
 
 #[bench]
 fn task_run(b: &mut Bencher) {
     b.iter(|| {
-        let (task, handle) = async_task::spawn(async {}, drop, ());
+        let (task, handle) = async_task::spawn(async {}, drop);
         task.run();
         executor::block_on(handle).unwrap();
     });
