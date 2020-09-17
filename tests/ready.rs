@@ -82,37 +82,10 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            move |_task: Task<_>| {
+            move |_task: Task| {
                 &guard;
                 $sched.fetch_add(1);
             }
-        };
-    };
-}
-
-// Creates a task with event counters.
-//
-// Usage: `task!(task, handle f, s, DROP)`
-//
-// A task with future `f` and schedule function `s` is created.
-// The `Task` and `JoinHandle` are bound to `task` and `handle`, respectively.
-// When the tag inside the task gets dropped, `DROP` is incremented.
-macro_rules! task {
-    ($task:pat, $handle: pat, $future:expr, $schedule:expr, $drop:ident) => {
-        lazy_static! {
-            static ref $drop: AtomicCell<usize> = AtomicCell::new(0);
-        }
-
-        let ($task, $handle) = {
-            struct Tag(Box<i32>);
-
-            impl Drop for Tag {
-                fn drop(&mut self) {
-                    $drop.fetch_add(1);
-                }
-            }
-
-            async_task::spawn($future, $schedule, Tag(Box::new(0)))
         };
     };
 }
@@ -125,7 +98,7 @@ fn ms(ms: u64) -> Duration {
 fn cancel_during_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -134,7 +107,6 @@ fn cancel_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 0);
-            assert_eq!(DROP_T.load(), 0);
             assert_eq!(DROP_O.load(), 1);
         });
 
@@ -145,7 +117,6 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
 
         thread::sleep(ms(400));
@@ -154,7 +125,6 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 1);
 
         drop(handle);
@@ -162,7 +132,6 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_T.load(), 1);
         assert_eq!(DROP_O.load(), 1);
     })
     .unwrap();
@@ -172,7 +141,7 @@ fn cancel_during_run() {
 fn join_during_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -183,7 +152,6 @@ fn join_during_run() {
 
             thread::sleep(ms(200));
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
         });
 
         thread::sleep(ms(200));
@@ -196,7 +164,6 @@ fn join_during_run() {
 
         thread::sleep(ms(200));
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_T.load(), 1);
     })
     .unwrap();
 }
@@ -205,7 +172,7 @@ fn join_during_run() {
 fn try_join_during_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, mut handle, f, s, DROP_T);
+    let (task, mut handle) = async_task::spawn(f, s);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -214,7 +181,6 @@ fn try_join_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
             assert_eq!(DROP_O.load(), 1);
         });
 
@@ -225,7 +191,6 @@ fn try_join_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
         drop(handle);
     })
@@ -236,7 +201,7 @@ fn try_join_during_run() {
 fn drop_handle_during_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
@@ -245,7 +210,6 @@ fn drop_handle_during_run() {
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
             assert_eq!(DROP_O.load(), 1);
         });
 
@@ -256,7 +220,6 @@ fn drop_handle_during_run() {
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(DROP_O.load(), 0);
     })
     .unwrap();

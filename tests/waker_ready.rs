@@ -90,40 +90,13 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            let sched = move |task: Task<_>| {
+            let sched = move |task: Task| {
                 &guard;
                 $sched.fetch_add(1);
                 s.send(task).unwrap();
             };
 
             (sched, r)
-        };
-    };
-}
-
-// Creates a task with event counters.
-//
-// Usage: `task!(task, handle f, s, DROP)`
-//
-// A task with future `f` and schedule function `s` is created.
-// The `Task` and `JoinHandle` are bound to `task` and `handle`, respectively.
-// When the tag inside the task gets dropped, `DROP` is incremented.
-macro_rules! task {
-    ($task:pat, $handle: pat, $future:expr, $schedule:expr, $drop:ident) => {
-        lazy_static! {
-            static ref $drop: AtomicCell<usize> = AtomicCell::new(0);
-        }
-
-        let ($task, $handle) = {
-            struct Tag(Box<i32>);
-
-            impl Drop for Tag {
-                fn drop(&mut self) {
-                    $drop.fetch_add(1);
-                }
-            }
-
-            async_task::spawn($future, $schedule, Tag(Box::new(0)))
         };
     };
 }
@@ -136,7 +109,7 @@ fn ms(ms: u64) -> Duration {
 fn wake() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(mut task, _, f, s, DROP_T);
+    let (mut task, _) = async_task::spawn(f, s);
 
     assert!(chan.is_empty());
 
@@ -145,7 +118,6 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake();
@@ -154,7 +126,6 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     task.run();
@@ -162,7 +133,6 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake();
@@ -170,7 +140,6 @@ fn wake() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -178,7 +147,7 @@ fn wake() {
 fn wake_by_ref() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(mut task, _, f, s, DROP_T);
+    let (mut task, _) = async_task::spawn(f, s);
 
     assert!(chan.is_empty());
 
@@ -187,7 +156,6 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake_by_ref();
@@ -196,7 +164,6 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     task.run();
@@ -204,7 +171,6 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake_by_ref();
@@ -212,7 +178,6 @@ fn wake_by_ref() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -220,14 +185,13 @@ fn wake_by_ref() {
 fn clone() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(mut task, _, f, s, DROP_T);
+    let (mut task, _) = async_task::spawn(f, s);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     let w2 = waker().clone();
@@ -241,7 +205,6 @@ fn clone() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     w3.wake();
@@ -249,27 +212,24 @@ fn clone() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     drop(w2);
     drop(waker());
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_T.load(), 1);
 }
 
 #[test]
 fn wake_canceled() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, _, f, s, DROP_T);
+    let (task, _) = async_task::spawn(f, s);
 
     task.run();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     let w = waker();
@@ -280,7 +240,6 @@ fn wake_canceled() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     w.wake();
@@ -288,7 +247,6 @@ fn wake_canceled() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -296,7 +254,7 @@ fn wake_canceled() {
 fn wake_completed() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, _, f, s, DROP_T);
+    let (task, _) = async_task::spawn(f, s);
 
     task.run();
     let w = waker();
@@ -304,7 +262,6 @@ fn wake_completed() {
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     w.wake();
@@ -313,7 +270,6 @@ fn wake_completed() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
     assert_eq!(chan.len(), 0);
 
     waker().wake();
@@ -321,6 +277,5 @@ fn wake_completed() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_T.load(), 1);
     assert_eq!(chan.len(), 0);
 }

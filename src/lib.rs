@@ -39,9 +39,6 @@
 //! task.schedule();
 //! ```
 //!
-//! The last argument to the [`spawn`] function is a *tag*, an arbitrary piece of data associated
-//! with the task. In most executors, this is typically a task identifier or task-local storage.
-//!
 //! The function returns a runnable [`Task`] and a [`JoinHandle`] that can await the result.
 //!
 //! # Execution

@@ -6,12 +6,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::thread;
 
+use async_task::Task;
 use crossbeam::channel::{unbounded, Sender};
 use futures::executor;
 use futures::future::FutureExt;
 use lazy_static::lazy_static;
-
-type Task = async_task::Task<()>;
 
 /// Spawns a future on the executor.
 fn spawn<F, R>(future: F) -> JoinHandle<R>
@@ -41,7 +40,7 @@ where
 
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = |t| QUEUE.send(t).unwrap();
-    let (task, handle) = async_task::spawn(future, schedule, ());
+    let (task, handle) = async_task::spawn(future, schedule);
 
     // Schedule the task by sending it into the channel.
     task.schedule();
@@ -51,7 +50,7 @@ where
 }
 
 /// A join handle that propagates panics inside the task.
-struct JoinHandle<R>(async_task::JoinHandle<thread::Result<R>, ()>);
+struct JoinHandle<R>(async_task::JoinHandle<thread::Result<R>>);
 
 impl<R> Future for JoinHandle<R> {
     type Output = Option<R>;

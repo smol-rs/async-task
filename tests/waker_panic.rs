@@ -92,40 +92,13 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            let sched = move |task: Task<_>| {
+            let sched = move |task: Task| {
                 &guard;
                 $sched.fetch_add(1);
                 s.send(task).unwrap();
             };
 
             (sched, r)
-        };
-    };
-}
-
-// Creates a task with event counters.
-//
-// Usage: `task!(task, handle f, s, DROP)`
-//
-// A task with future `f` and schedule function `s` is created.
-// The `Task` and `JoinHandle` are bound to `task` and `handle`, respectively.
-// When the tag inside the task gets dropped, `DROP` is incremented.
-macro_rules! task {
-    ($task:pat, $handle: pat, $future:expr, $schedule:expr, $drop:ident) => {
-        lazy_static! {
-            static ref $drop: AtomicCell<usize> = AtomicCell::new(0);
-        }
-
-        let ($task, $handle) = {
-            struct Tag(Box<i32>);
-
-            impl Drop for Tag {
-                fn drop(&mut self) {
-                    $drop.fetch_add(1);
-                }
-            }
-
-            async_task::spawn($future, $schedule, Tag(Box::new(0)))
         };
     };
 }
@@ -138,7 +111,7 @@ fn ms(ms: u64) -> Duration {
 fn wake_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     task.run();
     let w = waker();
@@ -153,7 +126,6 @@ fn wake_during_run() {
             assert_eq!(SCHEDULE.load(), 1);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
             assert_eq!(chan.len(), 0);
         });
 
@@ -165,7 +137,6 @@ fn wake_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         thread::sleep(ms(400));
@@ -174,7 +145,6 @@ fn wake_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_T.load(), 1);
         assert_eq!(chan.len(), 0);
     })
     .unwrap();
@@ -184,7 +154,7 @@ fn wake_during_run() {
 fn cancel_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     task.run();
     let w = waker();
@@ -199,7 +169,6 @@ fn cancel_during_run() {
             assert_eq!(SCHEDULE.load(), 1);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
             assert_eq!(chan.len(), 0);
         });
 
@@ -210,7 +179,6 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         drop(handle);
@@ -218,7 +186,6 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         thread::sleep(ms(400));
@@ -227,7 +194,6 @@ fn cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_T.load(), 1);
         assert_eq!(chan.len(), 0);
     })
     .unwrap();
@@ -237,7 +203,7 @@ fn cancel_during_run() {
 fn wake_and_cancel_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     task.run();
     let w = waker();
@@ -252,7 +218,6 @@ fn wake_and_cancel_during_run() {
             assert_eq!(SCHEDULE.load(), 1);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
             assert_eq!(chan.len(), 0);
         });
 
@@ -263,7 +228,6 @@ fn wake_and_cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         handle.cancel();
@@ -271,7 +235,6 @@ fn wake_and_cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         drop(handle);
@@ -279,7 +242,6 @@ fn wake_and_cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         thread::sleep(ms(400));
@@ -288,7 +250,6 @@ fn wake_and_cancel_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_T.load(), 1);
         assert_eq!(chan.len(), 0);
     })
     .unwrap();
@@ -298,7 +259,7 @@ fn wake_and_cancel_during_run() {
 fn cancel_and_wake_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     task.run();
     let w = waker();
@@ -313,7 +274,6 @@ fn cancel_and_wake_during_run() {
             assert_eq!(SCHEDULE.load(), 1);
             assert_eq!(DROP_F.load(), 1);
             assert_eq!(DROP_S.load(), 1);
-            assert_eq!(DROP_T.load(), 1);
             assert_eq!(chan.len(), 0);
         });
 
@@ -324,7 +284,6 @@ fn cancel_and_wake_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         drop(handle);
@@ -332,7 +291,6 @@ fn cancel_and_wake_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         w.wake();
@@ -340,7 +298,6 @@ fn cancel_and_wake_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
         assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_T.load(), 0);
         assert_eq!(chan.len(), 0);
 
         thread::sleep(ms(400));
@@ -349,7 +306,6 @@ fn cancel_and_wake_during_run() {
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 1);
         assert_eq!(DROP_S.load(), 1);
-        assert_eq!(DROP_T.load(), 1);
         assert_eq!(chan.len(), 0);
     })
     .unwrap();
@@ -359,7 +315,7 @@ fn cancel_and_wake_during_run() {
 fn panic_and_poll() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    task!(task, handle, f, s, DROP_T);
+    let (task, handle) = async_task::spawn(f, s);
 
     task.run();
     waker().wake();
@@ -367,7 +323,6 @@ fn panic_and_poll() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
 
     let mut handle = handle;
     assert!((&mut handle).now_or_never().is_none());
@@ -378,14 +333,12 @@ fn panic_and_poll() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
 
     assert!((&mut handle).now_or_never().is_some());
     assert_eq!(POLL.load(), 2);
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
-    assert_eq!(DROP_T.load(), 0);
 
     drop(waker());
     drop(handle);
@@ -393,5 +346,4 @@ fn panic_and_poll() {
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
-    assert_eq!(DROP_T.load(), 1);
 }

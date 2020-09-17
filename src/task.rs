@@ -17,7 +17,7 @@ use crate::JoinHandle;
 /// awaits its result.
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
-/// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
+/// `schedule` function.
 ///
 /// The schedule function should not attempt to run the task nor to drop it. Instead, it should
 /// push the task into some kind of queue so that it can be processed later.
@@ -47,24 +47,22 @@ use crate::JoinHandle;
 /// // Create a task with the future and the schedule function.
 /// let (task, handle) = async_task::spawn(future, schedule, ());
 /// ```
-pub fn spawn<F, R, S, T>(future: F, schedule: S, tag: T) -> (Task<T>, JoinHandle<R, T>)
+pub fn spawn<F, R, S>(future: F, schedule: S) -> (Task, JoinHandle<R>)
 where
     F: Future<Output = R> + Send + 'static,
     R: Send + 'static,
-    S: Fn(Task<T>) + Send + Sync + 'static,
-    T: Send + Sync + 'static,
+    S: Fn(Task) + Send + Sync + 'static,
 {
     // Allocate large futures on the heap.
     let raw_task = if mem::size_of::<F>() >= 2048 {
         let future = alloc::boxed::Box::pin(future);
-        RawTask::<_, R, S, T>::allocate(future, schedule, tag)
+        RawTask::<_, R, S>::allocate(future, schedule)
     } else {
-        RawTask::<F, R, S, T>::allocate(future, schedule, tag)
+        RawTask::<F, R, S>::allocate(future, schedule)
     };
 
     let task = Task {
         raw_task,
-        _marker: PhantomData,
     };
     let handle = JoinHandle {
         raw_task,
@@ -79,7 +77,7 @@ where
 /// awaits its result.
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
-/// `schedule` function. Argument `tag` is an arbitrary piece of data stored inside the task.
+/// `schedule` function.
 ///
 /// The schedule function should not attempt to run the task nor to drop it. Instead, it should
 /// push the task into some kind of queue so that it can be processed later.
@@ -113,12 +111,11 @@ where
 /// let (task, handle) = async_task::spawn_local(future, schedule, ());
 /// ```
 #[cfg(feature = "std")]
-pub fn spawn_local<F, R, S, T>(future: F, schedule: S, tag: T) -> (Task<T>, JoinHandle<R, T>)
+pub fn spawn_local<F, R, S>(future: F, schedule: S) -> (Task, JoinHandle<R>)
 where
     F: Future<Output = R> + 'static,
     R: 'static,
-    S: Fn(Task<T>) + Send + Sync + 'static,
-    T: Send + Sync + 'static,
+    S: Fn(Task) + Send + Sync + 'static,
 {
     extern crate std;
 
@@ -175,14 +172,13 @@ where
     // Allocate large futures on the heap.
     let raw_task = if mem::size_of::<F>() >= 2048 {
         let future = alloc::boxed::Box::pin(future);
-        RawTask::<_, R, S, T>::allocate(future, schedule, tag)
+        RawTask::<_, R, S>::allocate(future, schedule)
     } else {
-        RawTask::<_, R, S, T>::allocate(future, schedule, tag)
+        RawTask::<_, R, S>::allocate(future, schedule)
     };
 
     let task = Task {
         raw_task,
-        _marker: PhantomData,
     };
     let handle = JoinHandle {
         raw_task,
@@ -211,18 +207,15 @@ where
 /// [`JoinHandle`]: struct.JoinHandle.html
 /// [`Task`]: struct.Task.html
 /// [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
-pub struct Task<T> {
+pub struct Task {
     /// A pointer to the heap-allocated task.
     pub(crate) raw_task: NonNull<()>,
-
-    /// A marker capturing the generic type `T`.
-    pub(crate) _marker: PhantomData<T>,
 }
 
-unsafe impl<T> Send for Task<T> {}
-unsafe impl<T> Sync for Task<T> {}
+unsafe impl Send for Task {}
+unsafe impl Sync for Task {}
 
-impl<T> Task<T> {
+impl Task {
     /// Schedules the task.
     ///
     /// This is a convenience method that simply reschedules the task by passing it to its schedule
@@ -280,38 +273,21 @@ impl<T> Task<T> {
         }
     }
 
-    /// Returns a reference to the tag stored inside the task.
-    pub fn tag(&self) -> &T {
-        let offset = Header::offset_tag::<T>();
-        let ptr = self.raw_task.as_ptr();
-
-        unsafe {
-            let raw = (ptr as *mut u8).add(offset) as *const T;
-            &*raw
-        }
-    }
-
-    /// Converts this task into a raw pointer to the tag.
-    pub fn into_raw(self) -> *const T {
-        let offset = Header::offset_tag::<T>();
+    /// Converts this task into a raw pointer.
+    pub fn into_raw(self) -> *mut () {
         let ptr = self.raw_task.as_ptr();
         mem::forget(self);
-
-        unsafe { (ptr as *mut u8).add(offset) as *const T }
+        ptr
     }
 
-    /// Converts a raw pointer to the tag into a task.
+    /// Converts a raw pointer into a task.
     ///
     /// This method should only be used with raw pointers returned from [`into_raw`].
     ///
     /// [`into_raw`]: #method.into_raw
-    pub unsafe fn from_raw(raw: *const T) -> Task<T> {
-        let offset = Header::offset_tag::<T>();
-        let ptr = (raw as *mut u8).sub(offset) as *mut ();
-
+    pub unsafe fn from_raw(raw: *mut ()) -> Task {
         Task {
-            raw_task: NonNull::new_unchecked(ptr),
-            _marker: PhantomData,
+            raw_task: NonNull::new_unchecked(raw as *mut ()),
         }
     }
 
@@ -327,7 +303,7 @@ impl<T> Task<T> {
     }
 }
 
-impl<T> Drop for Task<T> {
+impl Drop for Task {
     fn drop(&mut self) {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -353,14 +329,13 @@ impl<T> Drop for Task<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Task<T> {
+impl fmt::Debug for Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
 
         f.debug_struct("Task")
             .field("header", unsafe { &(*header) })
-            .field("tag", self.tag())
             .finish()
     }
 }

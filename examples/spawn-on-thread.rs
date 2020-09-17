@@ -4,10 +4,9 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread;
 
+use async_task::JoinHandle;
 use crossbeam::channel;
 use futures::executor;
-
-type JoinHandle<T> = async_task::JoinHandle<T, ()>;
 
 /// Spawns a future on a new dedicated thread.
 ///
@@ -31,7 +30,7 @@ where
 
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = move |t| s.upgrade().unwrap().send(t).unwrap();
-    let (task, handle) = async_task::spawn(future, schedule, ());
+    let (task, handle) = async_task::spawn(future, schedule);
 
     // Schedule the task by sending it into the channel.
     task.schedule();

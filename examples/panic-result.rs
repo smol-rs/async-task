@@ -4,13 +4,11 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::thread;
 
+use async_task::{JoinHandle, Task};
 use crossbeam::channel::{unbounded, Sender};
 use futures::executor;
 use futures::future::FutureExt;
 use lazy_static::lazy_static;
-
-type Task = async_task::Task<()>;
-type JoinHandle<T> = async_task::JoinHandle<T, ()>;
 
 /// Spawns a future on the executor.
 fn spawn<F, R>(future: F) -> JoinHandle<thread::Result<R>>
@@ -40,7 +38,7 @@ where
 
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = |t| QUEUE.send(t).unwrap();
-    let (task, handle) = async_task::spawn(future, schedule, ());
+    let (task, handle) = async_task::spawn(future, schedule);
 
     // Schedule the task by sending it into the channel.
     task.schedule();
