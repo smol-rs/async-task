@@ -18,7 +18,7 @@
 //! # let schedule = move |task| sender.send(task).unwrap();
 //! #
 //! # // Construct a task.
-//! # let (task, handle) = async_task::spawn(future, schedule, ());
+//! # let (task, handle) = async_task::spawn(future, schedule);
 //! ```
 //!
 //! A task is constructed using either [`spawn`] or [`spawn_local`]:
@@ -33,7 +33,7 @@
 //! let schedule = move |task| sender.send(task).unwrap();
 //!
 //! // Construct a task.
-//! let (task, handle) = async_task::spawn(future, schedule, ());
+//! let (task, handle) = async_task::spawn(future, schedule);
 //!
 //! // Push the task into the queue by invoking its schedule function.
 //! task.schedule();
@@ -56,7 +56,7 @@
 //! # let schedule = move |task| sender.send(task).unwrap();
 //! #
 //! # // Construct a task.
-//! # let (task, handle) = async_task::spawn(future, schedule, ());
+//! # let (task, handle) = async_task::spawn(future, schedule);
 //! #
 //! # // Push the task into the queue by invoking its schedule function.
 //! # task.schedule();

@@ -45,7 +45,7 @@ use crate::JoinHandle;
 /// let schedule = move |task| s.send(task).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
-/// let (task, handle) = async_task::spawn(future, schedule, ());
+/// let (task, handle) = async_task::spawn(future, schedule);
 /// ```
 pub fn spawn<F, R, S>(future: F, schedule: S) -> (Task, JoinHandle<R>)
 where
@@ -106,7 +106,7 @@ where
 /// let schedule = move |task| s.send(task).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
-/// let (task, handle) = async_task::spawn_local(future, schedule, ());
+/// let (task, handle) = async_task::spawn_local(future, schedule);
 /// ```
 #[cfg(feature = "std")]
 pub fn spawn_local<F, R, S>(future: F, schedule: S) -> (Task, JoinHandle<R>)

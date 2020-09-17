@@ -299,9 +299,7 @@ fn waker() {
 
     let task = r.recv().unwrap();
     task.run();
-    handle.waker().wake();
-
-    r.recv().unwrap();
+    assert!(r.is_empty());
 }
 
 #[test]
