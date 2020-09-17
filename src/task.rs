@@ -61,9 +61,7 @@ where
         RawTask::<F, R, S>::allocate(future, schedule)
     };
 
-    let task = Task {
-        raw_task,
-    };
+    let task = Task { raw_task };
     let handle = JoinHandle {
         raw_task,
         _marker: PhantomData,
@@ -177,9 +175,7 @@ where
         RawTask::<_, R, S>::allocate(future, schedule)
     };
 
-    let task = Task {
-        raw_task,
-    };
+    let task = Task { raw_task };
     let handle = JoinHandle {
         raw_task,
         _marker: PhantomData,

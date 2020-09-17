@@ -90,24 +90,8 @@
 //! The layout of a task is equivalent to 4 `usize`s followed by the schedule function, and then by
 //! a union of the future and its output.
 //!
-//! # Waking
-//!
-//! The handy [`waker_fn`] constructor converts any function into a [`Waker`]. Every time it is
-//! woken, the function gets called:
-//!
-//! ```
-//! let waker = async_task::waker_fn(|| println!("Wake!"));
-//!
-//! // Prints "Wake!" twice.
-//! waker.wake_by_ref();
-//! waker.wake_by_ref();
-//! ```
-//!
-//! This is useful for implementing single-future executors like [`block_on`].
-//!
 //! [`spawn`]: fn.spawn.html
 //! [`spawn_local`]: fn.spawn_local.html
-//! [`waker_fn`]: fn.waker_fn.html
 //! [`Task`]: struct.Task.html
 //! [`JoinHandle`]: struct.JoinHandle.html
 //! [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
@@ -126,11 +110,9 @@ mod raw;
 mod state;
 mod task;
 mod utils;
-mod waker_fn;
 
 pub use crate::join_handle::JoinHandle;
 pub use crate::task::{spawn, Task};
-pub use crate::waker_fn::waker_fn;
 
 #[cfg(feature = "std")]
 pub use crate::task::spawn_local;
