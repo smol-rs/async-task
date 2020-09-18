@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::future::Future;
 use std::rc::Rc;
 
-use async_task::{JoinHandle, Runnable};
+use async_task::{Task, Runnable};
 
 thread_local! {
     // A channel that holds scheduled tasks.
@@ -12,19 +12,19 @@ thread_local! {
 }
 
 /// Spawns a future on the executor.
-fn spawn<F, T>(future: F) -> JoinHandle<T>
+fn spawn<F, T>(future: F) -> Task<T>
 where
     F: Future<Output = T> + 'static,
     T: 'static,
 {
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
-    let (runnable, handle) = async_task::spawn_local(future, schedule);
+    let (runnable, task) = async_task::spawn_local(future, schedule);
 
     // Schedule the task by sending it into the queue.
     runnable.schedule();
 
-    handle
+    task
 }
 
 /// Runs a future to completion.
@@ -56,7 +56,7 @@ fn main() {
         let val = val.clone();
         async move {
             // Spawn a future that increments the value.
-            let handle = spawn({
+            let task = spawn({
                 let val = val.clone();
                 async move {
                     val.set(dbg!(val.get()) + 1);
@@ -64,7 +64,7 @@ fn main() {
             });
 
             val.set(dbg!(val.get()) + 1);
-            handle.await;
+            task.await;
         }
     });
 

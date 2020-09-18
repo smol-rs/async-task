@@ -9,11 +9,11 @@ use core::task::Waker;
 use crate::header::Header;
 use crate::raw::RawTask;
 use crate::state::*;
-use crate::JoinHandle;
+use crate::Task;
 
 /// Creates a new task.
 ///
-/// This constructor returns a [`Runnable`] reference that runs the future and a [`JoinHandle`]
+/// This constructor returns a [`Runnable`] reference that runs the future and a [`Task`]
 /// that awaits its result.
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
@@ -38,9 +38,9 @@ use crate::JoinHandle;
 /// let schedule = move |runnable| s.send(runnable).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
-/// let (runnable, handle) = async_task::spawn(future, schedule);
+/// let (runnable, task) = async_task::spawn(future, schedule);
 /// ```
-pub fn spawn<F, T, S>(future: F, schedule: S) -> (Runnable, JoinHandle<T>)
+pub fn spawn<F, T, S>(future: F, schedule: S) -> (Runnable, Task<T>)
 where
     F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
@@ -54,17 +54,17 @@ where
         RawTask::<F, T, S>::allocate(future, schedule)
     };
 
-    let task = Runnable { raw_task };
-    let handle = JoinHandle {
+    let runnable = Runnable { raw_task };
+    let task = Task {
         raw_task,
         _marker: PhantomData,
     };
-    (task, handle)
+    (runnable, task)
 }
 
 /// Creates a new local task.
 ///
-/// This constructor returns a [`Runnable`] reference that runs the future and a [`JoinHandle`]
+/// This constructor returns a [`Runnable`] reference that runs the future and a [`Task`]
 /// that awaits its result.
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
@@ -92,10 +92,10 @@ where
 /// let schedule = move |runnable| s.send(runnable).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
-/// let (runnable, handle) = async_task::spawn_local(future, schedule);
+/// let (runnable, task) = async_task::spawn_local(future, schedule);
 /// ```
 #[cfg(feature = "std")]
-pub fn spawn_local<F, T, S>(future: F, schedule: S) -> (Runnable, JoinHandle<T>)
+pub fn spawn_local<F, T, S>(future: F, schedule: S) -> (Runnable, Task<T>)
 where
     F: Future<Output = T> + 'static,
     T: 'static,
@@ -158,12 +158,12 @@ where
         RawTask::<_, T, S>::allocate(future, schedule)
     };
 
-    let task = Runnable { raw_task };
-    let handle = JoinHandle {
+    let runnable = Runnable { raw_task };
+    let task = Task {
         raw_task,
         _marker: PhantomData,
     };
-    (task, handle)
+    (runnable, task)
 }
 
 /// A task reference that runs its future.
@@ -172,7 +172,7 @@ where
 /// task. Running consumes the [`Runnable`] reference and polls its internal future. If the future
 /// is still pending after getting polled, the [`Runnable`] reference simply won't exist until a
 /// [`Waker`] notifies the task. If the future completes, its result becomes available to the
-/// [`JoinHandle`].
+/// [`Task`].
 ///
 /// When a task is woken up, its [`Runnable`] reference is recreated and passed to the schedule
 /// function. In most executors, scheduling simply pushes the [`Runnable`] reference into a queue
@@ -180,7 +180,7 @@ where
 ///
 /// If the [`Runnable`] reference is dropped without getting run, the task is automatically
 /// canceled.  When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. It is
-/// possible for the [`JoinHandle`] to cancel while the [`Runnable`] reference exists, in which
+/// possible for the [`Task`] to cancel while the [`Runnable`] reference exists, in which
 /// case an attempt to run the task won't do anything.
 pub struct Runnable {
     /// A pointer to the heap-allocated task.
@@ -218,10 +218,10 @@ impl Runnable {
     /// the end of this method invocation.
     ///
     /// This method polls the task's future. If the future completes, its result will become
-    /// available to the [`JoinHandle`]. And if the future is still pending, the task will have to
+    /// available to the [`Task`]. And if the future is still pending, the task will have to
     /// be woken up in order to be rescheduled and run again.
     ///
-    /// If the task was canceled by a [`JoinHandle`] before it gets run, then this method won't do
+    /// If the task was canceled by a [`Task`] before it gets run, then this method won't do
     /// anything.
     ///
     /// It is possible that polling the future panics, in which case the panic will be propagated

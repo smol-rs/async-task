@@ -18,7 +18,7 @@
 //! # let schedule = move |runnable| sender.send(runnable).unwrap();
 //! #
 //! # // Construct a task.
-//! # let (runnable, handle) = async_task::spawn(future, schedule);
+//! # let (runnable, task) = async_task::spawn(future, schedule);
 //! ```
 //!
 //! A task is constructed using either [`spawn`] or [`spawn_local`]:
@@ -33,13 +33,13 @@
 //! let schedule = move |runnable| sender.send(runnable).unwrap();
 //!
 //! // Construct a task.
-//! let (runnable, handle) = async_task::spawn(future, schedule);
+//! let (runnable, task) = async_task::spawn(future, schedule);
 //!
 //! // Push the task into the queue by invoking its schedule function.
 //! runnable.schedule();
 //! ```
 //!
-//! The function returns a runnable [`Runnable`] and a [`JoinHandle`] that can await the result.
+//! The function returns a runnable [`Runnable`] and a [`Task`] that can await the result.
 //!
 //! # Execution
 //!
@@ -56,7 +56,7 @@
 //! # let schedule = move |runnable| sender.send(runnable).unwrap();
 //! #
 //! # // Construct a task.
-//! # let (runnable, handle) = async_task::spawn(future, schedule);
+//! # let (runnable, task) = async_task::spawn(future, schedule);
 //! #
 //! # // Push the task into the queue by invoking its schedule function.
 //! # runnable.schedule();
@@ -72,14 +72,14 @@
 //!
 //! # Cancellation
 //!
-//! Both [`Runnable`] and [`JoinHandle`] have methods that cancel the task. When canceled, the
+//! Both [`Runnable`] and [`Task`] have methods that cancel the task. When canceled, the
 //! task's future will not be polled again and will get dropped instead.
 //!
 //! If canceled by the [`Runnable`] instance, the task is destroyed immediately. If canceled by the
-//! [`JoinHandle`] instance, it will be scheduled one more time and the next attempt to run it will
+//! [`Task`] instance, it will be scheduled one more time and the next attempt to run it will
 //! simply destroy it.
 //!
-//! The `JoinHandle` future will then evaluate to `None`, but only after the task's future is
+//! The `Task` future will then evaluate to `None`, but only after the task's future is
 //! dropped.
 //!
 //! # Performance
@@ -100,14 +100,14 @@
 extern crate alloc;
 
 mod header;
-mod join_handle;
 mod raw;
-mod state;
 mod runnable;
+mod state;
+mod task;
 mod utils;
 
-pub use crate::join_handle::JoinHandle;
 pub use crate::runnable::{spawn, Runnable};
+pub use crate::task::Task;
 
 #[cfg(feature = "std")]
 pub use crate::runnable::spawn_local;

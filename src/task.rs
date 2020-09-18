@@ -17,7 +17,7 @@ use crate::state::*;
 /// * `None` indicates the task has panicked or was canceled.
 /// * `Some(result)` indicates the task has completed with `result` of type `T`.
 #[must_use = "tasks get canceled when dropped, use `.detach()` to run them in the background"]
-pub struct JoinHandle<T> {
+pub struct Task<T> {
     /// A raw task pointer.
     pub(crate) raw_task: NonNull<()>,
 
@@ -25,17 +25,17 @@ pub struct JoinHandle<T> {
     pub(crate) _marker: PhantomData<T>,
 }
 
-unsafe impl<T: Send> Send for JoinHandle<T> {}
-unsafe impl<T> Sync for JoinHandle<T> {}
+unsafe impl<T: Send> Send for Task<T> {}
+unsafe impl<T> Sync for Task<T> {}
 
-impl<T> Unpin for JoinHandle<T> {}
+impl<T> Unpin for Task<T> {}
 
 #[cfg(feature = "std")]
-impl<T> std::panic::UnwindSafe for JoinHandle<T> {}
+impl<T> std::panic::UnwindSafe for Task<T> {}
 #[cfg(feature = "std")]
-impl<T> std::panic::RefUnwindSafe for JoinHandle<T> {}
+impl<T> std::panic::RefUnwindSafe for Task<T> {}
 
-impl<T> JoinHandle<T> {
+impl<T> Task<T> {
     pub fn detach(self) {
         let mut this = self;
         let _out = this.set_detached();
@@ -46,7 +46,7 @@ impl<T> JoinHandle<T> {
         let mut this = self;
         this.set_canceled();
 
-        struct Fut<T>(JoinHandle<T>);
+        struct Fut<T>(Task<T>);
 
         impl<T> Future for Fut<T> {
             type Output = Option<T>;
@@ -114,7 +114,7 @@ impl<T> JoinHandle<T> {
             // A place where the output will be stored in case it needs to be dropped.
             let mut output = None;
 
-            // Optimistically assume the `JoinHandle` is being detached just after creating the
+            // Optimistically assume the `Task` is being detached just after creating the
             // task. This is a common case so if the handle is not used, the overhead of it is only
             // one compare-exchange operation.
             if let Err(mut state) = (*header).state.compare_exchange_weak(
@@ -262,14 +262,14 @@ impl<T> JoinHandle<T> {
     }
 }
 
-impl<T> Drop for JoinHandle<T> {
+impl<T> Drop for Task<T> {
     fn drop(&mut self) {
         self.set_canceled();
         self.set_detached();
     }
 }
 
-impl<T> Future for JoinHandle<T> {
+impl<T> Future for Task<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -280,12 +280,12 @@ impl<T> Future for JoinHandle<T> {
     }
 }
 
-impl<T> fmt::Debug for JoinHandle<T> {
+impl<T> fmt::Debug for Task<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
 
-        f.debug_struct("JoinHandle")
+        f.debug_struct("Task")
             .field("header", unsafe { &(*header) })
             .finish()
     }

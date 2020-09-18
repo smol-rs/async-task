@@ -4,12 +4,12 @@ use std::future::Future;
 use std::panic::catch_unwind;
 use std::thread;
 
-use async_task::{JoinHandle, Runnable};
+use async_task::{Task, Runnable};
 use futures_lite::future;
 use once_cell::sync::Lazy;
 
 /// Spawns a future on the executor.
-fn spawn<F, T>(future: F) -> JoinHandle<T>
+fn spawn<F, T>(future: F) -> Task<T>
 where
     F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
@@ -31,18 +31,18 @@ where
 
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = |t| QUEUE.send(t).unwrap();
-    let (runnable, handle) = async_task::spawn(future, schedule);
+    let (runnable, task) = async_task::spawn(future, schedule);
 
     // Schedule the task by sending it into the channel.
     runnable.schedule();
 
-    handle
+    task
 }
 
 fn main() {
     // Spawn a future and await its result.
-    let handle = spawn(async {
+    let task = spawn(async {
         println!("Hello, world!");
     });
-    future::block_on(handle);
+    future::block_on(task);
 }

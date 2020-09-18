@@ -11,21 +11,21 @@ use atomic_waker::AtomicWaker;
 
 // Creates a future with event counters.
 //
-// Usage: `future!(f, waker, POLL, DROP)`
+// Usage: `future!(f, get_waker, POLL, DROP)`
 //
 // The future `f` always sleeps for 200 ms, and returns `Poll::Ready` the second time it is polled.
 // When it gets polled, `POLL` is incremented.
 // When it gets dropped, `DROP` is incremented.
 //
 // Every time the future is run, it stores the waker into a global variable.
-// This waker can be extracted using the `waker` function.
+// This waker can be extracted using the `get_waker()` function.
 macro_rules! future {
-    ($name:pat, $waker:pat, $poll:ident, $drop:ident) => {
+    ($name:pat, $get_waker:pat, $poll:ident, $drop:ident) => {
         static $poll: AtomicUsize = AtomicUsize::new(0);
         static $drop: AtomicUsize = AtomicUsize::new(0);
         static WAKER: AtomicWaker = AtomicWaker::new();
 
-        let ($name, $waker) = {
+        let ($name, $get_waker) = {
             struct Fut(Cell<bool>, Box<i32>);
 
             impl Future for Fut {
@@ -99,10 +99,10 @@ fn ms(ms: u64) -> Duration {
 
 #[test]
 fn wake() {
-    future!(f, waker, POLL, DROP_F);
+    future!(f, get_waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (mut runnable, handle) = async_task::spawn(f, s);
-    handle.detach();
+    let (mut runnable, task) = async_task::spawn(f, s);
+    task.detach();
 
     assert!(chan.is_empty());
 
@@ -113,7 +113,7 @@ fn wake() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    waker().wake();
+    get_waker().wake();
     runnable = chan.recv().unwrap();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -128,7 +128,7 @@ fn wake() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    waker().wake();
+    get_waker().wake();
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -138,10 +138,10 @@ fn wake() {
 
 #[test]
 fn wake_by_ref() {
-    future!(f, waker, POLL, DROP_F);
+    future!(f, get_waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (mut runnable, handle) = async_task::spawn(f, s);
-    handle.detach();
+    let (mut runnable, task) = async_task::spawn(f, s);
+    task.detach();
 
     assert!(chan.is_empty());
 
@@ -152,7 +152,7 @@ fn wake_by_ref() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    waker().wake_by_ref();
+    get_waker().wake_by_ref();
     runnable = chan.recv().unwrap();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -167,7 +167,7 @@ fn wake_by_ref() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    waker().wake_by_ref();
+    get_waker().wake_by_ref();
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -177,10 +177,10 @@ fn wake_by_ref() {
 
 #[test]
 fn clone() {
-    future!(f, waker, POLL, DROP_F);
+    future!(f, get_waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (mut runnable, handle) = async_task::spawn(f, s);
-    handle.detach();
+    let (mut runnable, task) = async_task::spawn(f, s);
+    task.detach();
 
     runnable.run();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
@@ -189,7 +189,7 @@ fn clone() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    let w2 = waker().clone();
+    let w2 = get_waker().clone();
     let w3 = w2.clone();
     let w4 = w3.clone();
     w4.wake();
@@ -210,16 +210,16 @@ fn clone() {
     assert_eq!(chan.len(), 0);
 
     drop(w2);
-    drop(waker());
+    drop(get_waker());
     assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn wake_dropped() {
-    future!(f, waker, POLL, DROP_F);
+    future!(f, get_waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (runnable, handle) = async_task::spawn(f, s);
-    handle.detach();
+    let (runnable, task) = async_task::spawn(f, s);
+    task.detach();
 
     runnable.run();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
@@ -228,9 +228,9 @@ fn wake_dropped() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    let w = waker();
+    let waker = get_waker();
 
-    w.wake_by_ref();
+    waker.wake_by_ref();
     drop(chan.recv().unwrap());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -238,7 +238,7 @@ fn wake_dropped() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    w.wake();
+    waker.wake();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -248,20 +248,20 @@ fn wake_dropped() {
 
 #[test]
 fn wake_completed() {
-    future!(f, waker, POLL, DROP_F);
+    future!(f, get_waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (runnable, handle) = async_task::spawn(f, s);
-    handle.detach();
+    let (runnable, task) = async_task::spawn(f, s);
+    task.detach();
 
     runnable.run();
-    let w = waker();
+    let waker = get_waker();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    w.wake();
+    waker.wake();
     chan.recv().unwrap().run();
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -269,7 +269,7 @@ fn wake_completed() {
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
-    waker().wake();
+    get_waker().wake();
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);

@@ -18,7 +18,7 @@ pub(crate) const RUNNING: usize = 1 << 1;
 /// Set if the task has been completed.
 ///
 /// This flag is set when polling returns `Poll::Ready`. The output of the future is then stored
-/// inside the task until it becomes closed. In fact, `JoinHandle` picks up the output by marking
+/// inside the task until it becomes closed. In fact, `Task` picks up the output by marking
 /// the task as closed.
 ///
 /// This flag can't be set when the task is scheduled or running.
@@ -27,21 +27,21 @@ pub(crate) const COMPLETED: usize = 1 << 2;
 /// Set if the task is closed.
 ///
 /// If a task is closed, that means it's either canceled or its output has been consumed by the
-/// `JoinHandle`. A task becomes closed when:
+/// `Task`. A task becomes closed when:
 ///
 /// 1. It gets canceled by `Runnable::drop()`, `Task::drop()`, or `Task::cancel()`.
-/// 2. Its output gets awaited by the `JoinHandle`.
+/// 2. Its output gets awaited by the `Task`.
 /// 3. It panics while polling the future.
-/// 4. It is completed and the `JoinHandle` gets dropped.
+/// 4. It is completed and the `Task` gets dropped.
 pub(crate) const CLOSED: usize = 1 << 3;
 
-/// Set if the `JoinHandle` still exists.
+/// Set if the `Task` still exists.
 ///
-/// The `JoinHandle` is a special case in that it is only tracked by this flag, while all other
+/// The `Task` is a special case in that it is only tracked by this flag, while all other
 /// task references (`Runnable` and `Waker`s) are tracked by the reference count.
 pub(crate) const HANDLE: usize = 1 << 4;
 
-/// Set if the `JoinHandle` is awaiting the output.
+/// Set if the `Task` is awaiting the output.
 ///
 /// This flag is set while there is a registered awaiter of type `Waker` inside the task. When the
 /// task gets closed or completed, we need to wake the awaiter. This flag can be used as a fast
@@ -50,7 +50,7 @@ pub(crate) const AWAITER: usize = 1 << 5;
 
 /// Set if an awaiter is being registered.
 ///
-/// This flag is set when `JoinHandle` is polled and we are registering a new awaiter.
+/// This flag is set when `Task` is polled and we are registering a new awaiter.
 pub(crate) const REGISTERING: usize = 1 << 6;
 
 /// Set if the awaiter is being notified.
@@ -65,6 +65,6 @@ pub(crate) const NOTIFYING: usize = 1 << 7;
 /// bits contain the reference count. The value of `REFERENCE` represents a single reference in the
 /// total reference count.
 ///
-/// Note that the reference counter only tracks the `Runnable` and `Waker`s. The `JoinHandle` is
+/// Note that the reference counter only tracks the `Runnable` and `Waker`s. The `Task` is
 /// tracked separately by the `HANDLE` flag.
 pub(crate) const REFERENCE: usize = 1 << 8;

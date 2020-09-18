@@ -16,7 +16,7 @@ pub(crate) struct Header {
     /// Contains flags representing the current state and the reference count.
     pub(crate) state: AtomicUsize,
 
-    /// The task that is blocked on the `JoinHandle`.
+    /// The task that is blocked on the `Task`.
     ///
     /// This waker needs to be woken up once the task completes or is closed.
     pub(crate) awaiter: UnsafeCell<Option<Waker>>,
@@ -85,14 +85,14 @@ impl Header {
 
     /// Registers a new awaiter blocked on this task.
     ///
-    /// This method is called when `JoinHandle` is polled and the task has not completed.
+    /// This method is called when `Task` is polled and the task has not completed.
     #[inline]
     pub(crate) fn register(&self, waker: &Waker) {
         // Load the state and synchronize with it.
         let mut state = self.state.fetch_or(0, Ordering::Acquire);
 
         loop {
-            // There can't be two concurrent registrations because `JoinHandle` can only be polled
+            // There can't be two concurrent registrations because `Task` can only be polled
             // by a unique pinned reference.
             debug_assert!(state & REGISTERING == 0);
 

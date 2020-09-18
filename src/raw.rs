@@ -94,7 +94,7 @@ where
 
     /// Allocates a task with the given `future` and `schedule` function.
     ///
-    /// It is assumed that initially only the `Runnable` reference and the `JoinHandle` exist.
+    /// It is assumed that initially only the `Runnable` reference and the `Task` exist.
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
         // Compute the layout of the task for allocation. Abort if the computation fails.
         let task_layout = abort_on_panic(|| Self::task_layout());
@@ -337,7 +337,7 @@ where
         // Decrement the reference count.
         let new = (*raw.header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
 
-        // If this was the last reference to the task and the `JoinHandle` has been dropped too,
+        // If this was the last reference to the task and the `Task` has been dropped too,
         // then we need to decide how to destroy the task.
         if new & !(REFERENCE - 1) == 0 && new & HANDLE == 0 {
             if new & (COMPLETED | CLOSED) == 0 {
@@ -365,7 +365,7 @@ where
         // Decrement the reference count.
         let new = (*raw.header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
 
-        // If this was the last reference to the task and the `JoinHandle` has been dropped too,
+        // If this was the last reference to the task and the `Task` has been dropped too,
         // then destroy the task.
         if new & !(REFERENCE - 1) == 0 && new & HANDLE == 0 {
             Self::destroy(ptr);

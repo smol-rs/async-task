@@ -97,7 +97,7 @@ fn ms(ms: u64) -> Duration {
 fn run_and_cancel() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (runnable, handle) = async_task::spawn(f, s);
+    let (runnable, task) = async_task::spawn(f, s);
 
     runnable.run();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
@@ -106,7 +106,7 @@ fn run_and_cancel() {
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
 
-    assert!(future::block_on(handle.cancel()).is_some());
+    assert!(future::block_on(task.cancel()).is_some());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -118,7 +118,7 @@ fn run_and_cancel() {
 fn cancel_and_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (runnable, handle) = async_task::spawn(f, s);
+    let (runnable, task) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
@@ -132,7 +132,7 @@ fn cancel_and_run() {
             assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
         })
         .add(|| {
-            assert!(future::block_on(handle.cancel()).is_none());
+            assert!(future::block_on(task.cancel()).is_none());
 
             thread::sleep(ms(200));
 
@@ -149,7 +149,7 @@ fn cancel_and_run() {
 fn cancel_during_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (runnable, handle) = async_task::spawn(f, s);
+    let (runnable, task) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
@@ -166,7 +166,7 @@ fn cancel_during_run() {
         .add(|| {
             thread::sleep(ms(200));
 
-            assert!(future::block_on(handle.cancel()).is_none());
+            assert!(future::block_on(task.cancel()).is_none());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
