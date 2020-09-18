@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
-use async_task::Task;
+use async_task::Runnable;
 use easy_parallel::Parallel;
 use futures_lite::future;
 
@@ -68,7 +68,7 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            move |_task: Task| {
+            move |_runnable: Runnable| {
                 &guard;
                 $sched.fetch_add(1, Ordering::SeqCst);
             }
@@ -84,11 +84,11 @@ fn ms(ms: u64) -> Duration {
 fn cancel_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -110,9 +110,9 @@ fn cancel_during_run() {
 fn run_and_join() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    assert!(catch_unwind(|| task.run()).is_err());
+    assert!(catch_unwind(|| runnable.run()).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -129,7 +129,7 @@ fn run_and_join() {
 fn try_join_and_run_and_join() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, mut handle) = async_task::spawn(f, s);
+    let (runnable, mut handle) = async_task::spawn(f, s);
 
     future::block_on(future::or(&mut handle, future::ready(Default::default())));
     assert_eq!(POLL.load(Ordering::SeqCst), 0);
@@ -137,7 +137,7 @@ fn try_join_and_run_and_join() {
     assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
 
-    assert!(catch_unwind(|| task.run()).is_err());
+    assert!(catch_unwind(|| runnable.run()).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -154,11 +154,11 @@ fn try_join_and_run_and_join() {
 fn join_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -184,11 +184,11 @@ fn join_during_run() {
 fn try_join_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, mut handle) = async_task::spawn(f, s);
+    let (runnable, mut handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -211,11 +211,11 @@ fn try_join_during_run() {
 fn detach_during_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);

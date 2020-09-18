@@ -4,11 +4,11 @@ use std::cell::Cell;
 use std::future::Future;
 use std::rc::Rc;
 
-use async_task::{JoinHandle, Task};
+use async_task::{JoinHandle, Runnable};
 
 thread_local! {
     // A channel that holds scheduled tasks.
-    static QUEUE: (flume::Sender<Task>, flume::Receiver<Task>) = flume::unbounded();
+    static QUEUE: (flume::Sender<Runnable>, flume::Receiver<Runnable>) = flume::unbounded();
 }
 
 /// Spawns a future on the executor.
@@ -19,10 +19,10 @@ where
 {
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
-    let (task, handle) = async_task::spawn_local(future, schedule);
+    let (runnable, handle) = async_task::spawn_local(future, schedule);
 
     // Schedule the task by sending it into the queue.
-    task.schedule();
+    runnable.schedule();
 
     handle
 }

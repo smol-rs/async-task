@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
-use async_task::Task;
+use async_task::Runnable;
 use atomic_waker::AtomicWaker;
 use easy_parallel::Parallel;
 use futures_lite::future;
@@ -85,10 +85,10 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            let sched = move |task: Task| {
+            let sched = move |runnable: Runnable| {
                 &guard;
                 $sched.fetch_add(1, Ordering::SeqCst);
-                s.send(task).unwrap();
+                s.send(runnable).unwrap();
             };
 
             (sched, r)
@@ -108,16 +108,16 @@ fn try_await<T>(f: impl Future<Output = T>) -> Option<T> {
 fn wake_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    task.run();
+    runnable.run();
     let w = waker();
     w.wake_by_ref();
-    let task = chan.recv().unwrap();
+    let runnable = chan.recv().unwrap();
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             drop(waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -151,16 +151,16 @@ fn wake_during_run() {
 fn cancel_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    task.run();
+    runnable.run();
     let w = waker();
     w.wake();
-    let task = chan.recv().unwrap();
+    let runnable = chan.recv().unwrap();
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             drop(waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -193,16 +193,16 @@ fn cancel_during_run() {
 fn wake_and_cancel_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    task.run();
+    runnable.run();
     let w = waker();
     w.wake_by_ref();
-    let task = chan.recv().unwrap();
+    let runnable = chan.recv().unwrap();
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             drop(waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -242,16 +242,16 @@ fn wake_and_cancel_during_run() {
 fn cancel_and_wake_during_run() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    task.run();
+    runnable.run();
     let w = waker();
     w.wake_by_ref();
-    let task = chan.recv().unwrap();
+    let runnable = chan.recv().unwrap();
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| task.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             drop(waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -291,9 +291,9 @@ fn cancel_and_wake_during_run() {
 fn panic_and_poll() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    task.run();
+    runnable.run();
     waker().wake();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -303,8 +303,8 @@ fn panic_and_poll() {
     let mut handle = handle;
     assert!(try_await(&mut handle).is_none());
 
-    let task = chan.recv().unwrap();
-    assert!(catch_unwind(|| task.run()).is_err());
+    let runnable = chan.recv().unwrap();
+    assert!(catch_unwind(|| runnable.run()).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);

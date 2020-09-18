@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
-use async_task::Task;
+use async_task::Runnable;
 use easy_parallel::Parallel;
 use futures_lite::future;
 
@@ -81,9 +81,9 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            move |task: Task| {
+            move |runnable: Runnable| {
                 &guard;
-                task.schedule();
+                runnable.schedule();
                 $sched.fetch_add(1, Ordering::SeqCst);
             }
         };
@@ -98,11 +98,11 @@ fn ms(ms: u64) -> Duration {
 fn drop_and_join() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    drop(task);
+    drop(runnable);
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
     assert!(catch_unwind(|| future::block_on(handle)).is_err());
@@ -117,11 +117,11 @@ fn drop_and_join() {
 fn run_and_join() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    task.run();
+    runnable.run();
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
     assert!(catch_unwind(|| future::block_on(handle)).is_ok());
@@ -136,14 +136,14 @@ fn run_and_join() {
 fn detach_and_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
     handle.detach();
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    task.run();
+    runnable.run();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -155,11 +155,11 @@ fn detach_and_run() {
 fn join_twice() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, mut handle) = async_task::spawn(f, s);
+    let (runnable, mut handle) = async_task::spawn(f, s);
 
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    task.run();
+    runnable.run();
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
     future::block_on(&mut handle);
@@ -184,12 +184,12 @@ fn join_twice() {
 fn join_and_cancel() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
             thread::sleep(ms(200));
-            drop(task);
+            drop(runnable);
 
             thread::sleep(ms(400));
             assert_eq!(POLL.load(Ordering::SeqCst), 0);
@@ -215,13 +215,13 @@ fn join_and_cancel() {
 fn join_and_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
             thread::sleep(ms(400));
 
-            task.run();
+            runnable.run();
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -246,13 +246,13 @@ fn join_and_run() {
 fn try_join_and_run_and_join() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, mut handle) = async_task::spawn(f, s);
+    let (runnable, mut handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
             thread::sleep(ms(400));
 
-            task.run();
+            runnable.run();
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -284,13 +284,13 @@ fn try_join_and_run_and_join() {
 fn try_join_and_cancel_and_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, mut handle) = async_task::spawn(f, s);
+    let (runnable, mut handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
             thread::sleep(ms(200));
 
-            task.run();
+            runnable.run();
             assert_eq!(POLL.load(Ordering::SeqCst), 0);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -318,13 +318,13 @@ fn try_join_and_cancel_and_run() {
 fn try_join_and_run_and_cancel() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, mut handle) = async_task::spawn(f, s);
+    let (runnable, mut handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
             thread::sleep(ms(200));
 
-            task.run();
+            runnable.run();
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -369,18 +369,18 @@ fn await_output() {
     }
 
     for i in 0..10 {
-        let (task, handle) = async_task::spawn(Fut::new(i), drop);
-        task.run();
+        let (runnable, handle) = async_task::spawn(Fut::new(i), drop);
+        runnable.run();
         assert_eq!(future::block_on(handle), i);
     }
 
     for i in 0..10 {
-        let (task, handle) = async_task::spawn(Fut::new(vec![7; i]), drop);
-        task.run();
+        let (runnable, handle) = async_task::spawn(Fut::new(vec![7; i]), drop);
+        runnable.run();
         assert_eq!(future::block_on(handle), vec![7; i]);
     }
 
-    let (task, handle) = async_task::spawn(Fut::new("foo".to_string()), drop);
-    task.run();
+    let (runnable, handle) = async_task::spawn(Fut::new("foo".to_string()), drop);
+    runnable.run();
     assert_eq!(future::block_on(handle), "foo");
 }

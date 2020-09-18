@@ -29,16 +29,16 @@ where
 
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = move |t| s.upgrade().unwrap().send(t).unwrap();
-    let (task, handle) = async_task::spawn(future, schedule);
+    let (runnable, handle) = async_task::spawn(future, schedule);
 
     // Schedule the task by sending it into the channel.
-    task.schedule();
+    runnable.schedule();
 
     // Spawn a thread running the task to completion.
     thread::spawn(move || {
         // Keep taking the task from the channel and running it until completion.
-        for task in receiver {
-            task.run();
+        for runnable in receiver {
+            runnable.run();
         }
     });
 

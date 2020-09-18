@@ -15,10 +15,10 @@
 //! # let future = async { 1 + 2 };
 //! #
 //! # // A function that schedules the task when it gets woken up.
-//! # let schedule = move |task| sender.send(task).unwrap();
+//! # let schedule = move |runnable| sender.send(runnable).unwrap();
 //! #
 //! # // Construct a task.
-//! # let (task, handle) = async_task::spawn(future, schedule);
+//! # let (runnable, handle) = async_task::spawn(future, schedule);
 //! ```
 //!
 //! A task is constructed using either [`spawn`] or [`spawn_local`]:
@@ -30,16 +30,16 @@
 //! let future = async { 1 + 2 };
 //!
 //! // A function that schedules the task when it gets woken up.
-//! let schedule = move |task| sender.send(task).unwrap();
+//! let schedule = move |runnable| sender.send(runnable).unwrap();
 //!
 //! // Construct a task.
-//! let (task, handle) = async_task::spawn(future, schedule);
+//! let (runnable, handle) = async_task::spawn(future, schedule);
 //!
 //! // Push the task into the queue by invoking its schedule function.
-//! task.schedule();
+//! runnable.schedule();
 //! ```
 //!
-//! The function returns a runnable [`Task`] and a [`JoinHandle`] that can await the result.
+//! The function returns a runnable [`Runnable`] and a [`JoinHandle`] that can await the result.
 //!
 //! # Execution
 //!
@@ -53,16 +53,16 @@
 //! # let future = async { 1 + 2 };
 //! #
 //! # // A function that schedules the task when it gets woken up.
-//! # let schedule = move |task| sender.send(task).unwrap();
+//! # let schedule = move |runnable| sender.send(runnable).unwrap();
 //! #
 //! # // Construct a task.
-//! # let (task, handle) = async_task::spawn(future, schedule);
+//! # let (runnable, handle) = async_task::spawn(future, schedule);
 //! #
 //! # // Push the task into the queue by invoking its schedule function.
-//! # task.schedule();
+//! # runnable.schedule();
 //! #
-//! for task in receiver {
-//!     task.run();
+//! for runnable in receiver {
+//!     runnable.run();
 //! }
 //! ```
 //!
@@ -72,10 +72,10 @@
 //!
 //! # Cancellation
 //!
-//! Both [`Task`] and [`JoinHandle`] have methods that cancel the task. When canceled, the task's
-//! future will not be polled again and will get dropped instead.
+//! Both [`Runnable`] and [`JoinHandle`] have methods that cancel the task. When canceled, the
+//! task's future will not be polled again and will get dropped instead.
 //!
-//! If canceled by the [`Task`] instance, the task is destroyed immediately. If canceled by the
+//! If canceled by the [`Runnable`] instance, the task is destroyed immediately. If canceled by the
 //! [`JoinHandle`] instance, it will be scheduled one more time and the next attempt to run it will
 //! simply destroy it.
 //!
@@ -90,12 +90,7 @@
 //! The layout of a task is equivalent to 4 `usize`s followed by the schedule function, and then by
 //! a union of the future and its output.
 //!
-//! [`spawn`]: fn.spawn.html
-//! [`spawn_local`]: fn.spawn_local.html
-//! [`Task`]: struct.Task.html
-//! [`JoinHandle`]: struct.JoinHandle.html
-//! [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
-//! [`block_on`]: https://github.com/async-rs/async-task/blob/master/examples/block.rs
+//! [`block_on`]: https://github.com/stjepang/async-task/blob/master/examples/block.rs
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
@@ -108,11 +103,11 @@ mod header;
 mod join_handle;
 mod raw;
 mod state;
-mod task;
+mod runnable;
 mod utils;
 
 pub use crate::join_handle::JoinHandle;
-pub use crate::task::{spawn, Task};
+pub use crate::runnable::{spawn, Runnable};
 
 #[cfg(feature = "std")]
-pub use crate::task::spawn_local;
+pub use crate::runnable::spawn_local;

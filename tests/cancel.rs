@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
-use async_task::Task;
+use async_task::Runnable;
 use easy_parallel::Parallel;
 use futures_lite::future;
 
@@ -80,9 +80,9 @@ macro_rules! schedule {
             }
 
             let guard = Guard(Box::new(0));
-            move |task: Task| {
+            move |runnable: Runnable| {
                 &guard;
-                task.schedule();
+                runnable.schedule();
                 $sched.fetch_add(1, Ordering::SeqCst);
             }
         };
@@ -97,9 +97,9 @@ fn ms(ms: u64) -> Duration {
 fn run_and_cancel() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
-    task.run();
+    runnable.run();
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -118,12 +118,12 @@ fn run_and_cancel() {
 fn cancel_and_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
             thread::sleep(ms(200));
-            task.run();
+            runnable.run();
 
             assert_eq!(POLL.load(Ordering::SeqCst), 0);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
@@ -149,11 +149,11 @@ fn cancel_and_run() {
 fn cancel_during_run() {
     future!(f, POLL, DROP_F, DROP_T);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (runnable, handle) = async_task::spawn(f, s);
 
     Parallel::new()
         .add(|| {
-            task.run();
+            runnable.run();
 
             thread::sleep(ms(200));
 

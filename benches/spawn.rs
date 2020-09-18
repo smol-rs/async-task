@@ -17,8 +17,8 @@ fn task_create(b: &mut Bencher) {
 #[bench]
 fn task_run(b: &mut Bencher) {
     b.iter(|| {
-        let (task, handle) = async_task::spawn(async {}, drop);
-        task.run();
+        let (runnable, handle) = async_task::spawn(async {}, drop);
+        runnable.run();
         executor::block_on(handle).unwrap();
     });
 }
@@ -35,9 +35,9 @@ fn oneshot_create(b: &mut Bencher) {
 fn oneshot_run(b: &mut Bencher) {
     b.iter(|| {
         let (tx, rx) = oneshot::channel::<()>();
-        let task = Box::new(async move { tx.send(()).map_err(|_| ()) });
+        let runnable = Box::new(async move { tx.send(()).map_err(|_| ()) });
 
-        let future = task.and_then(|_| rx.map_err(|_| ()));
+        let future = runnable.and_then(|_| rx.map_err(|_| ()));
         executor::block_on(future).unwrap();
     });
 }

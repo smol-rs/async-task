@@ -13,8 +13,8 @@ use crate::JoinHandle;
 
 /// Creates a new task.
 ///
-/// This constructor returns a [`Task`] reference that runs the future and a [`JoinHandle`] that
-/// awaits its result.
+/// This constructor returns a [`Runnable`] reference that runs the future and a [`JoinHandle`]
+/// that awaits its result.
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
 /// `schedule` function.
@@ -25,11 +25,6 @@ use crate::JoinHandle;
 /// If you need to spawn a future that does not implement [`Send`], consider using the
 /// [`spawn_local`] function instead.
 ///
-/// [`Task`]: struct.Task.html
-/// [`JoinHandle`]: struct.JoinHandle.html
-/// [`Send`]: https://doc.rust-lang.org/std/marker/trait.Send.html
-/// [`spawn_local`]: fn.spawn_local.html
-///
 /// # Examples
 ///
 /// ```
@@ -40,16 +35,16 @@ use crate::JoinHandle;
 ///
 /// // If the task gets woken up, it will be sent into this channel.
 /// let (s, r) = flume::unbounded();
-/// let schedule = move |task| s.send(task).unwrap();
+/// let schedule = move |runnable| s.send(runnable).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
-/// let (task, handle) = async_task::spawn(future, schedule);
+/// let (runnable, handle) = async_task::spawn(future, schedule);
 /// ```
-pub fn spawn<F, T, S>(future: F, schedule: S) -> (Task, JoinHandle<T>)
+pub fn spawn<F, T, S>(future: F, schedule: S) -> (Runnable, JoinHandle<T>)
 where
     F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
-    S: Fn(Task) + Send + Sync + 'static,
+    S: Fn(Runnable) + Send + Sync + 'static,
 {
     // Allocate large futures on the heap.
     let raw_task = if mem::size_of::<F>() >= 2048 {
@@ -59,7 +54,7 @@ where
         RawTask::<F, T, S>::allocate(future, schedule)
     };
 
-    let task = Task { raw_task };
+    let task = Runnable { raw_task };
     let handle = JoinHandle {
         raw_task,
         _marker: PhantomData,
@@ -69,8 +64,8 @@ where
 
 /// Creates a new local task.
 ///
-/// This constructor returns a [`Task`] reference that runs the future and a [`JoinHandle`] that
-/// awaits its result.
+/// This constructor returns a [`Runnable`] reference that runs the future and a [`JoinHandle`]
+/// that awaits its result.
 ///
 /// When run, the task polls `future`. When woken up, it gets scheduled for running by the
 /// `schedule` function.
@@ -79,15 +74,10 @@ where
 /// push the task into some kind of queue so that it can be processed later.
 ///
 /// Unlike [`spawn`], this function does not require the future to implement [`Send`]. If the
-/// [`Task`] reference is run or dropped on a thread it was not created on, a panic will occur.
+/// [`Runnable`] reference is run or dropped on a thread it was not created on, a panic will occur.
 ///
 /// **NOTE:** This function is only available when the `std` feature for this crate is enabled (it
 /// is by default).
-///
-/// [`Task`]: struct.Task.html
-/// [`JoinHandle`]: struct.JoinHandle.html
-/// [`spawn`]: fn.spawn.html
-/// [`Send`]: https://doc.rust-lang.org/std/marker/trait.Send.html
 ///
 /// # Examples
 ///
@@ -99,17 +89,17 @@ where
 ///
 /// // If the task gets woken up, it will be sent into this channel.
 /// let (s, r) = flume::unbounded();
-/// let schedule = move |task| s.send(task).unwrap();
+/// let schedule = move |runnable| s.send(runnable).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
-/// let (task, handle) = async_task::spawn_local(future, schedule);
+/// let (runnable, handle) = async_task::spawn_local(future, schedule);
 /// ```
 #[cfg(feature = "std")]
-pub fn spawn_local<F, T, S>(future: F, schedule: S) -> (Task, JoinHandle<T>)
+pub fn spawn_local<F, T, S>(future: F, schedule: S) -> (Runnable, JoinHandle<T>)
 where
     F: Future<Output = T> + 'static,
     T: 'static,
-    S: Fn(Task) + Send + Sync + 'static,
+    S: Fn(Runnable) + Send + Sync + 'static,
 {
     use std::mem::ManuallyDrop;
     use std::pin::Pin;
@@ -168,7 +158,7 @@ where
         RawTask::<_, T, S>::allocate(future, schedule)
     };
 
-    let task = Task { raw_task };
+    let task = Runnable { raw_task };
     let handle = JoinHandle {
         raw_task,
         _marker: PhantomData,
@@ -178,38 +168,34 @@ where
 
 /// A task reference that runs its future.
 ///
-/// At any moment in time, there is at most one [`Task`] reference associated with a particular
-/// task. Running consumes the [`Task`] reference and polls its internal future. If the future is
-/// still pending after getting polled, the [`Task`] reference simply won't exist until a [`Waker`]
-/// notifies the task. If the future completes, its result becomes available to the [`JoinHandle`].
+/// At any moment in time, there is at most one [`Runnable`] reference associated with a particular
+/// task. Running consumes the [`Runnable`] reference and polls its internal future. If the future
+/// is still pending after getting polled, the [`Runnable`] reference simply won't exist until a
+/// [`Waker`] notifies the task. If the future completes, its result becomes available to the
+/// [`JoinHandle`].
 ///
-/// When a task is woken up, its [`Task`] reference is recreated and passed to the schedule
-/// function. In most executors, scheduling simply pushes the [`Task`] reference into a queue of
-/// runnable tasks.
+/// When a task is woken up, its [`Runnable`] reference is recreated and passed to the schedule
+/// function. In most executors, scheduling simply pushes the [`Runnable`] reference into a queue
+/// of runnable tasks.
 ///
-/// If the [`Task`] reference is dropped without getting run, the task is automatically canceled.
-/// When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. It is possible
-/// for the [`JoinHandle`] to cancel while the [`Task`] reference exists, in which case an attempt
-/// to run the task won't do anything.
-///
-/// [`run()`]: struct.Task.html#method.run
-/// [`JoinHandle`]: struct.JoinHandle.html
-/// [`Task`]: struct.Task.html
-/// [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
-pub struct Task {
+/// If the [`Runnable`] reference is dropped without getting run, the task is automatically
+/// canceled.  When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. It is
+/// possible for the [`JoinHandle`] to cancel while the [`Runnable`] reference exists, in which
+/// case an attempt to run the task won't do anything.
+pub struct Runnable {
     /// A pointer to the heap-allocated task.
     pub(crate) raw_task: NonNull<()>,
 }
 
-unsafe impl Send for Task {}
-unsafe impl Sync for Task {}
+unsafe impl Send for Runnable {}
+unsafe impl Sync for Runnable {}
 
 #[cfg(feature = "std")]
-impl std::panic::UnwindSafe for Task {}
+impl std::panic::UnwindSafe for Runnable {}
 #[cfg(feature = "std")]
-impl std::panic::RefUnwindSafe for Task {}
+impl std::panic::RefUnwindSafe for Runnable {}
 
-impl Task {
+impl Runnable {
     /// Schedules the task.
     ///
     /// This is a convenience method that simply reschedules the task by passing it to its schedule
@@ -241,9 +227,6 @@ impl Task {
     /// It is possible that polling the future panics, in which case the panic will be propagated
     /// into the caller. It is advised that invocations of this method are wrapped inside
     /// [`catch_unwind`]. If a panic occurs, the task is automatically canceled.
-    ///
-    /// [`JoinHandle`]: struct.JoinHandle.html
-    /// [`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
     pub fn run(self) -> bool {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -264,7 +247,7 @@ impl Task {
     }
 }
 
-impl Drop for Task {
+impl Drop for Runnable {
     fn drop(&mut self) {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
@@ -290,12 +273,12 @@ impl Drop for Task {
     }
 }
 
-impl fmt::Debug for Task {
+impl fmt::Debug for Runnable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
 
-        f.debug_struct("Task")
+        f.debug_struct("Runnable")
             .field("header", unsafe { &(*header) })
             .finish()
     }

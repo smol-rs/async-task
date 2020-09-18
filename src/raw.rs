@@ -10,7 +10,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use crate::header::Header;
 use crate::state::*;
 use crate::utils::{abort, abort_on_panic, extend};
-use crate::Task;
+use crate::Runnable;
 
 /// The vtable for a task.
 pub(crate) struct TaskVTable {
@@ -83,7 +83,7 @@ impl<F, T, S> Clone for RawTask<F, T, S> {
 impl<F, T, S> RawTask<F, T, S>
 where
     F: Future<Output = T> + 'static,
-    S: Fn(Task) + Send + Sync + 'static,
+    S: Fn(Runnable) + Send + Sync + 'static,
 {
     const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
@@ -94,7 +94,7 @@ where
 
     /// Allocates a task with the given `future` and `schedule` function.
     ///
-    /// It is assumed that initially only the `Task` reference and the `JoinHandle` exist.
+    /// It is assumed that initially only the `Runnable` reference and the `JoinHandle` exist.
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
         // Compute the layout of the task for allocation. Abort if the computation fails.
         let task_layout = abort_on_panic(|| Self::task_layout());
@@ -295,7 +295,7 @@ where
                             // Schedule the task. There is no need to call `Self::schedule(ptr)`
                             // because the schedule function cannot be destroyed while the waker is
                             // still alive.
-                            let task = Task {
+                            let task = Runnable {
                                 raw_task: NonNull::new_unchecked(ptr as *mut ()),
                             };
                             (*raw.schedule)(task);
@@ -386,7 +386,7 @@ where
             _waker = Waker::from_raw(Self::clone_waker(ptr));
         }
 
-        let task = Task {
+        let task = Runnable {
             raw_task: NonNull::new_unchecked(ptr as *mut ()),
         };
         (*raw.schedule)(task);
@@ -593,12 +593,12 @@ where
         struct Guard<F, T, S>(RawTask<F, T, S>)
         where
             F: Future<Output = T> + 'static,
-            S: Fn(Task) + Send + Sync + 'static;
+            S: Fn(Runnable) + Send + Sync + 'static;
 
         impl<F, T, S> Drop for Guard<F, T, S>
         where
             F: Future<Output = T> + 'static,
-            S: Fn(Task) + Send + Sync + 'static,
+            S: Fn(Runnable) + Send + Sync + 'static,
         {
             fn drop(&mut self) {
                 let raw = self.0;
