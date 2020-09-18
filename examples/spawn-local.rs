@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::future::Future;
 use std::rc::Rc;
 
-use async_task::{Task, Runnable};
+use async_task::{Runnable, Task};
 
 thread_local! {
     // A channel that holds scheduled tasks.

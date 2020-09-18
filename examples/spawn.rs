@@ -4,7 +4,7 @@ use std::future::Future;
 use std::panic::catch_unwind;
 use std::thread;
 
-use async_task::{Task, Runnable};
+use async_task::{Runnable, Task};
 use futures_lite::future;
 use once_cell::sync::Lazy;
 
