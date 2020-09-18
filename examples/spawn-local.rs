@@ -36,7 +36,7 @@ where
 {
     // Spawn a task that sends its result through a channel.
     let (s, r) = unbounded();
-    spawn(async move { s.send(future.await).unwrap() });
+    spawn(async move { s.send(future.await).unwrap() }).detach();
 
     loop {
         // If the original task has completed, return its result.

@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::future::Future;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
@@ -32,7 +33,7 @@ macro_rules! future {
 
                 fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
                     $poll.fetch_add(1, Ordering::SeqCst);
-                    Poll::Ready(Out(Box::new(0)))
+                    Poll::Ready(Out(Box::new(0), true))
                 }
             }
 
@@ -42,11 +43,14 @@ macro_rules! future {
                 }
             }
 
-            struct Out(Box<i32>);
+            #[derive(Default)]
+            struct Out(Box<i32>, bool);
 
             impl Drop for Out {
                 fn drop(&mut self) {
-                    $drop_t.fetch_add(1, Ordering::SeqCst);
+                    if self.1 {
+                        $drop_t.fetch_add(1, Ordering::SeqCst);
+                    }
                 }
             }
 
@@ -101,7 +105,7 @@ fn drop_and_join() {
     drop(task);
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    assert!(future::block_on(handle).is_none());
+    assert!(catch_unwind(|| future::block_on(handle)).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 0);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -120,7 +124,7 @@ fn run_and_join() {
     task.run();
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    assert!(future::block_on(handle).is_some());
+    assert!(catch_unwind(|| future::block_on(handle)).is_ok());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -158,14 +162,14 @@ fn join_twice() {
     task.run();
     assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-    assert!(future::block_on(&mut handle).is_some());
+    future::block_on(&mut handle);
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_T.load(Ordering::SeqCst), 1);
 
-    assert!(future::block_on(&mut handle).is_none());
+    assert!(catch_unwind(AssertUnwindSafe(|| future::block_on(&mut handle))).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -195,7 +199,7 @@ fn join_and_cancel() {
             assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
         })
         .add(|| {
-            assert!(future::block_on(handle).is_none());
+            assert!(catch_unwind(|| future::block_on(handle)).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 0);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
 
@@ -226,7 +230,7 @@ fn join_and_run() {
             assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
         })
         .add(|| {
-            assert!(future::block_on(handle).is_some());
+            future::block_on(handle);
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -264,7 +268,7 @@ fn try_join_and_run_and_join() {
             assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
 
-            assert!(future::block_on(handle).is_some());
+            future::block_on(handle);
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -367,16 +371,16 @@ fn await_output() {
     for i in 0..10 {
         let (task, handle) = async_task::spawn(Fut::new(i), drop);
         task.run();
-        assert_eq!(future::block_on(handle), Some(i));
+        assert_eq!(future::block_on(handle), i);
     }
 
     for i in 0..10 {
         let (task, handle) = async_task::spawn(Fut::new(vec![7; i]), drop);
         task.run();
-        assert_eq!(future::block_on(handle), Some(vec![7; i]));
+        assert_eq!(future::block_on(handle), vec![7; i]);
     }
 
     let (task, handle) = async_task::spawn(Fut::new("foo".to_string()), drop);
     task.run();
-    assert_eq!(future::block_on(handle), Some("foo".to_string()));
+    assert_eq!(future::block_on(handle), "foo");
 }

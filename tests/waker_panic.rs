@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::future::Future;
-use std::panic::catch_unwind;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
@@ -311,7 +311,7 @@ fn panic_and_poll() {
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
 
-    assert!(try_await(&mut handle).is_some());
+    assert!(catch_unwind(AssertUnwindSafe(|| try_await(&mut handle))).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);

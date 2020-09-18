@@ -196,7 +196,7 @@ fn run_and_cancel() {
 }
 
 #[test]
-fn cancel_and_poll() {
+fn cancel_join() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, mut handle) = async_task::spawn(f, s);

@@ -115,13 +115,10 @@ where
     R: 'static,
     S: Fn(Task) + Send + Sync + 'static,
 {
-    extern crate std;
-
     use std::mem::ManuallyDrop;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use std::thread::{self, ThreadId};
-    use std::thread_local;
 
     #[inline]
     fn thread_id() -> ThreadId {
@@ -210,6 +207,11 @@ pub struct Task {
 
 unsafe impl Send for Task {}
 unsafe impl Sync for Task {}
+
+#[cfg(feature = "std")]
+impl std::panic::UnwindSafe for Task {}
+#[cfg(feature = "std")]
+impl std::panic::RefUnwindSafe for Task {}
 
 impl Task {
     /// Schedules the task.
