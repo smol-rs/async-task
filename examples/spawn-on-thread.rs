@@ -6,7 +6,7 @@ use std::thread;
 
 use async_task::JoinHandle;
 use crossbeam::channel;
-use futures::executor;
+use futures_lite::future;
 
 /// Spawns a future on a new dedicated thread.
 ///
@@ -48,7 +48,7 @@ where
 
 fn main() {
     // Spawn a future on a dedicated thread.
-    executor::block_on(spawn_on_thread(async {
+    future::block_on(spawn_on_thread(async {
         println!("Hello, world!");
     }));
 }

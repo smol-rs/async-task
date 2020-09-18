@@ -1,14 +1,14 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::task::Waker;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
 use async_task::Task;
-use crossbeam::atomic::AtomicCell;
+use atomic_waker::AtomicWaker;
 use crossbeam::channel;
-use lazy_static::lazy_static;
+use easy_parallel::Parallel;
 
 // Creates a future with event counters.
 //
@@ -22,11 +22,9 @@ use lazy_static::lazy_static;
 // This waker can be extracted using the `waker` function.
 macro_rules! future {
     ($name:pat, $waker:pat, $poll:ident, $drop:ident) => {
-        lazy_static! {
-            static ref $poll: AtomicCell<usize> = AtomicCell::new(0);
-            static ref $drop: AtomicCell<usize> = AtomicCell::new(0);
-            static ref WAKER: AtomicCell<Option<Waker>> = AtomicCell::new(None);
-        }
+        static $poll: AtomicUsize = AtomicUsize::new(0);
+        static $drop: AtomicUsize = AtomicUsize::new(0);
+        static WAKER: AtomicWaker = AtomicWaker::new();
 
         let ($name, $waker) = {
             struct Fut(Box<i32>);
@@ -35,8 +33,8 @@ macro_rules! future {
                 type Output = ();
 
                 fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                    WAKER.store(Some(cx.waker().clone()));
-                    $poll.fetch_add(1);
+                    WAKER.register(cx.waker());
+                    $poll.fetch_add(1, Ordering::SeqCst);
                     thread::sleep(ms(400));
                     Poll::Pending
                 }
@@ -44,11 +42,11 @@ macro_rules! future {
 
             impl Drop for Fut {
                 fn drop(&mut self) {
-                    $drop.fetch_add(1);
+                    $drop.fetch_add(1, Ordering::SeqCst);
                 }
             }
 
-            (Fut(Box::new(0)), || WAKER.swap(None).unwrap())
+            (Fut(Box::new(0)), || WAKER.take().unwrap())
         };
     };
 }
@@ -64,10 +62,8 @@ macro_rules! future {
 // Receiver `chan` extracts the task when it is scheduled.
 macro_rules! schedule {
     ($name:pat, $chan:pat, $sched:ident, $drop:ident) => {
-        lazy_static! {
-            static ref $sched: AtomicCell<usize> = AtomicCell::new(0);
-            static ref $drop: AtomicCell<usize> = AtomicCell::new(0);
-        }
+        static $drop: AtomicUsize = AtomicUsize::new(0);
+        static $sched: AtomicUsize = AtomicUsize::new(0);
 
         let ($name, $chan) = {
             let (s, r) = channel::unbounded();
@@ -76,14 +72,14 @@ macro_rules! schedule {
 
             impl Drop for Guard {
                 fn drop(&mut self) {
-                    $drop.fetch_add(1);
+                    $drop.fetch_add(1, Ordering::SeqCst);
                 }
             }
 
             let guard = Guard(Box::new(0));
             let sched = move |task: Task| {
                 &guard;
-                $sched.fetch_add(1);
+                $sched.fetch_add(1, Ordering::SeqCst);
                 s.send(task).unwrap();
             };
 
@@ -107,34 +103,34 @@ fn wake_during_run() {
     w.wake_by_ref();
     let task = chan.recv().unwrap();
 
-    crossbeam::scope(|scope| {
-        scope.spawn(|_| {
+    Parallel::new()
+        .add(|| {
             task.run();
-            assert_eq!(POLL.load(), 2);
-            assert_eq!(SCHEDULE.load(), 2);
-            assert_eq!(DROP_F.load(), 0);
-            assert_eq!(DROP_S.load(), 0);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 2);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
             assert_eq!(chan.len(), 1);
-        });
+        })
+        .add(|| {
+            thread::sleep(ms(200));
 
-        thread::sleep(ms(200));
+            w.wake_by_ref();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 0);
 
-        w.wake_by_ref();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
+            thread::sleep(ms(400));
 
-        thread::sleep(ms(400));
-
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 2);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 1);
-    })
-    .unwrap();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 2);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 1);
+        })
+        .run();
 
     chan.recv().unwrap();
     drop(waker());
@@ -151,35 +147,35 @@ fn cancel_during_run() {
     w.wake();
     let task = chan.recv().unwrap();
 
-    crossbeam::scope(|scope| {
-        scope.spawn(|_| {
+    Parallel::new()
+        .add(|| {
             task.run();
             drop(waker());
-            assert_eq!(POLL.load(), 2);
-            assert_eq!(SCHEDULE.load(), 1);
-            assert_eq!(DROP_F.load(), 1);
-            assert_eq!(DROP_S.load(), 1);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
             assert_eq!(chan.len(), 0);
-        });
+        })
+        .add(|| {
+            thread::sleep(ms(200));
 
-        thread::sleep(ms(200));
+            drop(handle);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 0);
 
-        drop(handle);
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
+            thread::sleep(ms(400));
 
-        thread::sleep(ms(400));
-
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 1);
-        assert_eq!(DROP_S.load(), 1);
-        assert_eq!(chan.len(), 0);
-    })
-    .unwrap();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
+            assert_eq!(chan.len(), 0);
+        })
+        .run();
 }
 
 #[test]
@@ -193,42 +189,42 @@ fn wake_and_cancel_during_run() {
     w.wake_by_ref();
     let task = chan.recv().unwrap();
 
-    crossbeam::scope(|scope| {
-        scope.spawn(|_| {
+    Parallel::new()
+        .add(|| {
             task.run();
             drop(waker());
-            assert_eq!(POLL.load(), 2);
-            assert_eq!(SCHEDULE.load(), 1);
-            assert_eq!(DROP_F.load(), 1);
-            assert_eq!(DROP_S.load(), 1);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
             assert_eq!(chan.len(), 0);
-        });
+        })
+        .add(|| {
+            thread::sleep(ms(200));
 
-        thread::sleep(ms(200));
+            w.wake();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 0);
 
-        w.wake();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
+            drop(handle);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 0);
 
-        drop(handle);
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
+            thread::sleep(ms(400));
 
-        thread::sleep(ms(400));
-
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 1);
-        assert_eq!(DROP_S.load(), 1);
-        assert_eq!(chan.len(), 0);
-    })
-    .unwrap();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
+            assert_eq!(chan.len(), 0);
+        })
+        .run();
 }
 
 #[test]
@@ -242,42 +238,42 @@ fn cancel_and_wake_during_run() {
     w.wake_by_ref();
     let task = chan.recv().unwrap();
 
-    crossbeam::scope(|scope| {
-        scope.spawn(|_| {
+    Parallel::new()
+        .add(|| {
             task.run();
             drop(waker());
-            assert_eq!(POLL.load(), 2);
-            assert_eq!(SCHEDULE.load(), 1);
-            assert_eq!(DROP_F.load(), 1);
-            assert_eq!(DROP_S.load(), 1);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
             assert_eq!(chan.len(), 0);
-        });
+        })
+        .add(|| {
+            thread::sleep(ms(200));
 
-        thread::sleep(ms(200));
+            drop(handle);
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 0);
 
-        drop(handle);
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
+            w.wake();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+            assert_eq!(chan.len(), 0);
 
-        w.wake();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
+            thread::sleep(ms(400));
 
-        thread::sleep(ms(400));
-
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 1);
-        assert_eq!(DROP_S.load(), 1);
-        assert_eq!(chan.len(), 0);
-    })
-    .unwrap();
+            assert_eq!(POLL.load(Ordering::SeqCst), 2);
+            assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
+            assert_eq!(chan.len(), 0);
+        })
+        .run();
 }
 
 #[test]
@@ -290,24 +286,24 @@ fn drop_last_waker() {
     let w = waker();
 
     handle.detach();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
     drop(w);
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 1);
 
     chan.recv().unwrap().run();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 1);
-    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -319,24 +315,24 @@ fn cancel_last_handle() {
 
     task.run();
     drop(waker());
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
     drop(handle);
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 1);
 
     chan.recv().unwrap().run();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 1);
-    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
     assert_eq!(chan.len(), 0);
 }
 
@@ -348,23 +344,23 @@ fn drop_last_handle() {
 
     task.run();
     drop(waker());
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 0);
 
     handle.detach();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
     assert_eq!(chan.len(), 1);
 
     chan.recv().unwrap().run();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 1);
-    assert_eq!(DROP_S.load(), 1);
+    assert_eq!(POLL.load(Ordering::SeqCst), 1);
+    assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
+    assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
     assert_eq!(chan.len(), 0);
 }

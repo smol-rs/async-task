@@ -6,9 +6,8 @@ use std::thread;
 
 use async_task::{JoinHandle, Task};
 use crossbeam::channel::{unbounded, Sender};
-use futures::executor;
-use futures::future::FutureExt;
-use lazy_static::lazy_static;
+use futures_lite::{future, FutureExt};
+use once_cell::sync::Lazy;
 
 /// Spawns a future on the executor.
 fn spawn<F, R>(future: F) -> JoinHandle<thread::Result<R>>
@@ -16,22 +15,20 @@ where
     F: Future<Output = R> + Send + 'static,
     R: Send + 'static,
 {
-    lazy_static! {
-        // A channel that holds scheduled tasks.
-        static ref QUEUE: Sender<Task> = {
-            let (sender, receiver) = unbounded::<Task>();
+    // A channel that holds scheduled tasks.
+    static QUEUE: Lazy<Sender<Task>> = Lazy::new(|| {
+        let (sender, receiver) = unbounded::<Task>();
 
-            // Start the executor thread.
-            thread::spawn(|| {
-                for task in receiver {
-                    // No need for `catch_unwind()` here because panics are already caught.
-                    task.run();
-                }
-            });
+        // Start the executor thread.
+        thread::spawn(|| {
+            for task in receiver {
+                // No need for `catch_unwind()` here because panics are already caught.
+                task.run();
+            }
+        });
 
-            sender
-        };
-    }
+        sender
+    });
 
     // Create a future that catches panics within itself.
     let future = AssertUnwindSafe(future).catch_unwind();
@@ -53,7 +50,7 @@ fn main() {
     });
 
     // Block on the future and report its result.
-    match executor::block_on(handle) {
+    match future::block_on(handle) {
         None => println!("The task was canceled."),
         Some(Ok(val)) => println!("The task completed with {:?}", val),
         Some(Err(_)) => println!("The task has panicked"),
@@ -65,7 +62,7 @@ fn main() {
     });
 
     // Block on the future and report its result.
-    match executor::block_on(handle) {
+    match future::block_on(handle) {
         None => println!("The task was canceled."),
         Some(Ok(val)) => println!("The task completed with {:?}", val),
         Some(Err(_)) => println!("The task has panicked"),

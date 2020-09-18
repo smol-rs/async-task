@@ -8,9 +8,8 @@ use std::thread;
 
 use async_task::Task;
 use crossbeam::channel::{unbounded, Sender};
-use futures::executor;
-use futures::future::FutureExt;
-use lazy_static::lazy_static;
+use futures_lite::{future, FutureExt};
+use once_cell::sync::Lazy;
 
 /// Spawns a future on the executor.
 fn spawn<F, R>(future: F) -> JoinHandle<R>
@@ -18,22 +17,20 @@ where
     F: Future<Output = R> + Send + 'static,
     R: Send + 'static,
 {
-    lazy_static! {
-        // A channel that holds scheduled tasks.
-        static ref QUEUE: Sender<Task> = {
-            let (sender, receiver) = unbounded::<Task>();
+    // A channel that holds scheduled tasks.
+    static QUEUE: Lazy<Sender<Task>> = Lazy::new(|| {
+        let (sender, receiver) = unbounded::<Task>();
 
-            // Start the executor thread.
-            thread::spawn(|| {
-                for task in receiver {
-                    // No need for `catch_unwind()` here because panics are already caught.
-                    task.run();
-                }
-            });
+        // Start the executor thread.
+        thread::spawn(|| {
+            for task in receiver {
+                // No need for `catch_unwind()` here because panics are already caught.
+                task.run();
+            }
+        });
 
-            sender
-        };
-    }
+        sender
+    });
 
     // Create a future that catches panics within itself.
     let future = AssertUnwindSafe(future).catch_unwind();
@@ -70,5 +67,5 @@ fn main() {
     let handle = spawn(async {
         panic!("Ooops!");
     });
-    executor::block_on(handle);
+    future::block_on(handle);
 }
