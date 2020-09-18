@@ -12,10 +12,10 @@ thread_local! {
 }
 
 /// Spawns a future on the executor.
-fn spawn<F, R>(future: F) -> JoinHandle<R>
+fn spawn<F, T>(future: F) -> JoinHandle<T>
 where
-    F: Future<Output = R> + 'static,
-    R: 'static,
+    F: Future<Output = T> + 'static,
+    T: 'static,
 {
     // Create a task that is scheduled by sending itself into the channel.
     let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
@@ -28,10 +28,10 @@ where
 }
 
 /// Runs a future to completion.
-fn run<F, R>(future: F) -> R
+fn run<F, T>(future: F) -> T
 where
-    F: Future<Output = R> + 'static,
-    R: 'static,
+    F: Future<Output = T> + 'static,
+    T: 'static,
 {
     // Spawn a task that sends its result through a channel.
     let (s, r) = flume::unbounded();

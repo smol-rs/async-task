@@ -9,10 +9,10 @@ use futures_lite::future;
 use once_cell::sync::Lazy;
 
 /// Spawns a future on the executor.
-fn spawn<F, R>(future: F) -> JoinHandle<R>
+fn spawn<F, T>(future: F) -> JoinHandle<T>
 where
-    F: Future<Output = R> + Send + 'static,
-    R: Send + 'static,
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
 {
     // A channel that holds scheduled tasks.
     static QUEUE: Lazy<flume::Sender<Task>> = Lazy::new(|| {

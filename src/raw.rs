@@ -58,7 +58,7 @@ pub(crate) struct TaskLayout {
 }
 
 /// Raw pointers to the fields inside a task.
-pub(crate) struct RawTask<F, R, S> {
+pub(crate) struct RawTask<F, T, S> {
     /// The task header.
     pub(crate) header: *const Header,
 
@@ -69,20 +69,20 @@ pub(crate) struct RawTask<F, R, S> {
     pub(crate) future: *mut F,
 
     /// The output of the future.
-    pub(crate) output: *mut R,
+    pub(crate) output: *mut T,
 }
 
-impl<F, R, S> Copy for RawTask<F, R, S> {}
+impl<F, T, S> Copy for RawTask<F, T, S> {}
 
-impl<F, R, S> Clone for RawTask<F, R, S> {
+impl<F, T, S> Clone for RawTask<F, T, S> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<F, R, S> RawTask<F, R, S>
+impl<F, T, S> RawTask<F, T, S>
 where
-    F: Future<Output = R> + 'static,
+    F: Future<Output = T> + 'static,
     S: Fn(Task) + Send + Sync + 'static,
 {
     const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
@@ -144,7 +144,7 @@ where
                 header: p as *const Header,
                 schedule: p.add(task_layout.offset_s) as *const S,
                 future: p.add(task_layout.offset_f) as *mut F,
-                output: p.add(task_layout.offset_r) as *mut R,
+                output: p.add(task_layout.offset_r) as *mut T,
             }
         }
     }
@@ -152,18 +152,18 @@ where
     /// Returns the memory layout for a task.
     #[inline]
     fn task_layout() -> TaskLayout {
-        // Compute the layouts for `Header`, `S`, `F`, and `R`.
+        // Compute the layouts for `Header`, `S`, `F`, and `T`.
         let layout_header = Layout::new::<Header>();
         let layout_s = Layout::new::<S>();
         let layout_f = Layout::new::<F>();
-        let layout_r = Layout::new::<R>();
+        let layout_r = Layout::new::<T>();
 
-        // Compute the layout for `union { F, R }`.
+        // Compute the layout for `union { F, T }`.
         let size_union = layout_f.size().max(layout_r.size());
         let align_union = layout_f.align().max(layout_r.align());
         let layout_union = unsafe { Layout::from_size_align_unchecked(size_union, align_union) };
 
-        // Compute the layout for `Header` followed `S` and `union { F, R }`.
+        // Compute the layout for `Header` followed `S` and `union { F, T }`.
         let layout = layout_header;
         let (layout, offset_s) = extend(layout, layout_s);
         let (layout, offset_union) = extend(layout, layout_union);
@@ -590,14 +590,14 @@ where
         return false;
 
         /// A guard that closes the task if polling its future panics.
-        struct Guard<F, R, S>(RawTask<F, R, S>)
+        struct Guard<F, T, S>(RawTask<F, T, S>)
         where
-            F: Future<Output = R> + 'static,
+            F: Future<Output = T> + 'static,
             S: Fn(Task) + Send + Sync + 'static;
 
-        impl<F, R, S> Drop for Guard<F, R, S>
+        impl<F, T, S> Drop for Guard<F, T, S>
         where
-            F: Future<Output = R> + 'static,
+            F: Future<Output = T> + 'static,
             S: Fn(Task) + Send + Sync + 'static,
         {
             fn drop(&mut self) {
@@ -613,7 +613,7 @@ where
                         if state & CLOSED != 0 {
                             // The thread that closed the task didn't drop the future because it
                             // was running so now it's our responsibility to do so.
-                            RawTask::<F, R, S>::drop_future(ptr);
+                            RawTask::<F, T, S>::drop_future(ptr);
 
                             // Mark the task as not running and not scheduled.
                             (*raw.header)
@@ -626,7 +626,7 @@ where
                             }
 
                             // Drop the task reference.
-                            RawTask::<F, R, S>::drop_task(ptr);
+                            RawTask::<F, T, S>::drop_task(ptr);
                             break;
                         }
 
@@ -639,7 +639,7 @@ where
                         ) {
                             Ok(state) => {
                                 // Drop the future because the task is now closed.
-                                RawTask::<F, R, S>::drop_future(ptr);
+                                RawTask::<F, T, S>::drop_future(ptr);
 
                                 // Notify the awaiter that the future has been dropped.
                                 if state & AWAITER != 0 {
@@ -647,7 +647,7 @@ where
                                 }
 
                                 // Drop the task reference.
-                                RawTask::<F, R, S>::drop_task(ptr);
+                                RawTask::<F, T, S>::drop_task(ptr);
                                 break;
                             }
                             Err(s) => state = s,

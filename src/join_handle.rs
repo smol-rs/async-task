@@ -12,37 +12,37 @@ use crate::state::*;
 
 /// A handle that awaits the result of a task.
 ///
-/// This type is a future that resolves to an `Option<R>` where:
+/// This type is a future that resolves to an `Option<T>` where:
 ///
 /// * `None` indicates the task has panicked or was canceled.
-/// * `Some(result)` indicates the task has completed with `result` of type `R`.
+/// * `Some(result)` indicates the task has completed with `result` of type `T`.
 #[must_use = "tasks get canceled when dropped, use `.detach()` to run them in the background"]
-pub struct JoinHandle<R> {
+pub struct JoinHandle<T> {
     /// A raw task pointer.
     pub(crate) raw_task: NonNull<()>,
 
-    /// A marker capturing generic type `R`.
-    pub(crate) _marker: PhantomData<R>,
+    /// A marker capturing generic type `T`.
+    pub(crate) _marker: PhantomData<T>,
 }
 
-unsafe impl<R: Send> Send for JoinHandle<R> {}
-unsafe impl<R> Sync for JoinHandle<R> {}
+unsafe impl<T: Send> Send for JoinHandle<T> {}
+unsafe impl<T> Sync for JoinHandle<T> {}
 
-impl<R> Unpin for JoinHandle<R> {}
+impl<T> Unpin for JoinHandle<T> {}
 
 #[cfg(feature = "std")]
-impl<R> std::panic::UnwindSafe for JoinHandle<R> {}
+impl<T> std::panic::UnwindSafe for JoinHandle<T> {}
 #[cfg(feature = "std")]
-impl<R> std::panic::RefUnwindSafe for JoinHandle<R> {}
+impl<T> std::panic::RefUnwindSafe for JoinHandle<T> {}
 
-impl<R> JoinHandle<R> {
+impl<T> JoinHandle<T> {
     pub fn detach(self) {
         let mut this = self;
         let _out = this.set_detached();
         mem::forget(this);
     }
 
-    pub async fn cancel(self) -> Option<R> {
+    pub async fn cancel(self) -> Option<T> {
         let mut this = self;
         this.set_canceled();
 
@@ -106,7 +106,7 @@ impl<R> JoinHandle<R> {
         }
     }
 
-    fn set_detached(&mut self) -> Option<R> {
+    fn set_detached(&mut self) -> Option<T> {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
 
@@ -137,7 +137,7 @@ impl<R> JoinHandle<R> {
                             Ok(_) => {
                                 // Read the output.
                                 output =
-                                    Some((((*header).vtable.get_output)(ptr) as *mut R).read());
+                                    Some((((*header).vtable.get_output)(ptr) as *mut T).read());
 
                                 // Update the state variable because we're continuing the loop.
                                 state |= CLOSED;
@@ -184,7 +184,7 @@ impl<R> JoinHandle<R> {
         }
     }
 
-    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<Option<R>> {
+    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
 
@@ -252,7 +252,7 @@ impl<R> JoinHandle<R> {
                         }
 
                         // Take the output from the task.
-                        let output = ((*header).vtable.get_output)(ptr) as *mut R;
+                        let output = ((*header).vtable.get_output)(ptr) as *mut T;
                         return Poll::Ready(Some(output.read()));
                     }
                     Err(s) => state = s,
@@ -262,15 +262,15 @@ impl<R> JoinHandle<R> {
     }
 }
 
-impl<R> Drop for JoinHandle<R> {
+impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
         self.set_canceled();
         self.set_detached();
     }
 }
 
-impl<R> Future for JoinHandle<R> {
-    type Output = R;
+impl<T> Future for JoinHandle<T> {
+    type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.poll_result(cx) {
@@ -280,7 +280,7 @@ impl<R> Future for JoinHandle<R> {
     }
 }
 
-impl<R> fmt::Debug for JoinHandle<R> {
+impl<T> fmt::Debug for JoinHandle<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;

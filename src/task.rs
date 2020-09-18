@@ -45,18 +45,18 @@ use crate::JoinHandle;
 /// // Create a task with the future and the schedule function.
 /// let (task, handle) = async_task::spawn(future, schedule);
 /// ```
-pub fn spawn<F, R, S>(future: F, schedule: S) -> (Task, JoinHandle<R>)
+pub fn spawn<F, T, S>(future: F, schedule: S) -> (Task, JoinHandle<T>)
 where
-    F: Future<Output = R> + Send + 'static,
-    R: Send + 'static,
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
     S: Fn(Task) + Send + Sync + 'static,
 {
     // Allocate large futures on the heap.
     let raw_task = if mem::size_of::<F>() >= 2048 {
         let future = alloc::boxed::Box::pin(future);
-        RawTask::<_, R, S>::allocate(future, schedule)
+        RawTask::<_, T, S>::allocate(future, schedule)
     } else {
-        RawTask::<F, R, S>::allocate(future, schedule)
+        RawTask::<F, T, S>::allocate(future, schedule)
     };
 
     let task = Task { raw_task };
@@ -105,10 +105,10 @@ where
 /// let (task, handle) = async_task::spawn_local(future, schedule);
 /// ```
 #[cfg(feature = "std")]
-pub fn spawn_local<F, R, S>(future: F, schedule: S) -> (Task, JoinHandle<R>)
+pub fn spawn_local<F, T, S>(future: F, schedule: S) -> (Task, JoinHandle<T>)
 where
-    F: Future<Output = R> + 'static,
-    R: 'static,
+    F: Future<Output = T> + 'static,
+    T: 'static,
     S: Fn(Task) + Send + Sync + 'static,
 {
     use std::mem::ManuallyDrop;
@@ -163,9 +163,9 @@ where
     // Allocate large futures on the heap.
     let raw_task = if mem::size_of::<F>() >= 2048 {
         let future = alloc::boxed::Box::pin(future);
-        RawTask::<_, R, S>::allocate(future, schedule)
+        RawTask::<_, T, S>::allocate(future, schedule)
     } else {
-        RawTask::<_, R, S>::allocate(future, schedule)
+        RawTask::<_, T, S>::allocate(future, schedule)
     };
 
     let task = Task { raw_task };

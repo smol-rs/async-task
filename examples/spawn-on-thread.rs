@@ -10,10 +10,10 @@ use futures_lite::future;
 /// Spawns a future on a new dedicated thread.
 ///
 /// The returned handle can be used to await the output of the future.
-fn spawn_on_thread<F, R>(future: F) -> JoinHandle<R>
+fn spawn_on_thread<F, T>(future: F) -> JoinHandle<T>
 where
-    F: Future<Output = R> + Send + 'static,
-    R: Send + 'static,
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
 {
     // Create a channel that holds the task when it is scheduled for running.
     let (sender, receiver) = flume::unbounded();
