@@ -254,18 +254,14 @@ impl Task {
         unsafe { ((*header).vtable.run)(ptr) }
     }
 
-    /// Cancels the task.
-    ///
-    /// When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. An attempt
-    /// to run it won't do anything.
-    ///
-    /// [`Waker`]: https://doc.rust-lang.org/std/task/struct.Waker.html
-    pub fn cancel(&self) {
+    /// Returns a waker associated with this task.
+    pub fn waker(&self) -> Waker {
         let ptr = self.raw_task.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
-            (*header).cancel();
+            let raw_waker = ((*header).vtable.clone_waker)(ptr);
+            Waker::from_raw(raw_waker)
         }
     }
 
@@ -284,17 +280,6 @@ impl Task {
     pub unsafe fn from_raw(raw: *mut ()) -> Task {
         Task {
             raw_task: NonNull::new_unchecked(raw as *mut ()),
-        }
-    }
-
-    /// Returns a waker associated with this task.
-    pub fn waker(&self) -> Waker {
-        let ptr = self.raw_task.as_ptr();
-        let header = ptr as *const Header;
-
-        unsafe {
-            let raw_waker = ((*header).vtable.clone_waker)(ptr);
-            Waker::from_raw(raw_waker)
         }
     }
 }

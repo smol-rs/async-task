@@ -106,13 +106,19 @@ fn cancel_during_run() {
             assert_eq!(POLL.load(), 1);
             assert_eq!(SCHEDULE.load(), 0);
             assert_eq!(DROP_F.load(), 1);
-            assert_eq!(DROP_S.load(), 0);
+            assert_eq!(DROP_S.load(), 1);
             assert_eq!(DROP_O.load(), 1);
         });
 
         thread::sleep(ms(200));
 
-        handle.cancel();
+        assert_eq!(POLL.load(), 1);
+        assert_eq!(SCHEDULE.load(), 0);
+        assert_eq!(DROP_F.load(), 0);
+        assert_eq!(DROP_S.load(), 0);
+        assert_eq!(DROP_O.load(), 0);
+
+        drop(handle);
         assert_eq!(POLL.load(), 1);
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
@@ -121,13 +127,6 @@ fn cancel_during_run() {
 
         thread::sleep(ms(400));
 
-        assert_eq!(POLL.load(), 1);
-        assert_eq!(SCHEDULE.load(), 0);
-        assert_eq!(DROP_F.load(), 1);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_O.load(), 1);
-
-        drop(handle);
         assert_eq!(POLL.load(), 1);
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 1);
@@ -151,6 +150,7 @@ fn join_during_run() {
             assert_eq!(DROP_F.load(), 1);
 
             thread::sleep(ms(200));
+
             assert_eq!(DROP_S.load(), 1);
         });
 
@@ -163,6 +163,7 @@ fn join_during_run() {
         assert_eq!(DROP_O.load(), 1);
 
         thread::sleep(ms(200));
+
         assert_eq!(DROP_S.load(), 1);
     })
     .unwrap();
@@ -198,7 +199,7 @@ fn try_join_during_run() {
 }
 
 #[test]
-fn drop_handle_during_run() {
+fn detach_during_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
@@ -215,7 +216,7 @@ fn drop_handle_during_run() {
 
         thread::sleep(ms(200));
 
-        drop(handle);
+        handle.detach();
         assert_eq!(POLL.load(), 1);
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);

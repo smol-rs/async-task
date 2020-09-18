@@ -96,14 +96,13 @@ fn ms(ms: u64) -> Duration {
 }
 
 #[test]
-fn cancel_and_join() {
+fn drop_and_join() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
 
     assert_eq!(DROP_O.load(), 0);
 
-    task.cancel();
     drop(task);
     assert_eq!(DROP_O.load(), 0);
 
@@ -135,14 +134,14 @@ fn run_and_join() {
 }
 
 #[test]
-fn drop_handle_and_run() {
+fn detach_and_run() {
     future!(f, POLL, DROP_F, DROP_O);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
 
     assert_eq!(DROP_O.load(), 0);
 
-    drop(handle);
+    handle.detach();
     assert_eq!(DROP_O.load(), 0);
 
     task.run();
@@ -178,7 +177,7 @@ fn join_twice() {
     assert_eq!(DROP_S.load(), 0);
     assert_eq!(DROP_O.load(), 1);
 
-    drop(handle);
+    handle.detach();
     assert_eq!(DROP_S.load(), 1);
 }
 
@@ -191,8 +190,6 @@ fn join_and_cancel() {
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
             thread::sleep(ms(200));
-
-            task.cancel();
             drop(task);
 
             thread::sleep(ms(400));
@@ -292,7 +289,7 @@ fn try_join_and_cancel_and_run() {
 
     crossbeam::scope(|scope| {
         scope.spawn(|_| {
-            thread::sleep(ms(400));
+            thread::sleep(ms(200));
 
             task.run();
             assert_eq!(POLL.load(), 0);
@@ -302,13 +299,6 @@ fn try_join_and_cancel_and_run() {
         });
 
         block_on(future::select(&mut handle, future::ready(())));
-        assert_eq!(POLL.load(), 0);
-        assert_eq!(SCHEDULE.load(), 0);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_O.load(), 0);
-
-        handle.cancel();
         assert_eq!(POLL.load(), 0);
         assert_eq!(SCHEDULE.load(), 0);
         assert_eq!(DROP_F.load(), 0);
@@ -350,13 +340,6 @@ fn try_join_and_run_and_cancel() {
         assert_eq!(DROP_O.load(), 0);
 
         thread::sleep(ms(400));
-
-        handle.cancel();
-        assert_eq!(POLL.load(), 1);
-        assert_eq!(SCHEDULE.load(), 0);
-        assert_eq!(DROP_F.load(), 1);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(DROP_O.load(), 0);
 
         drop(handle);
         assert_eq!(POLL.load(), 1);

@@ -1,6 +1,7 @@
 use core::fmt;
 use core::future::Future;
 use core::marker::{PhantomData, Unpin};
+use core::mem;
 use core::pin::Pin;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
@@ -29,130 +30,131 @@ unsafe impl<R> Sync for JoinHandle<R> {}
 impl<R> Unpin for JoinHandle<R> {}
 
 impl<R> JoinHandle<R> {
-    /// Cancels the task.
-    ///
-    /// If the task has already completed, calling this method will have no effect.
-    ///
-    /// When a task is canceled, its future will not be polled again.
-    pub fn cancel(&self) {
+    pub fn detach(self) {
         let ptr = self.raw_task.as_ptr();
+        mem::forget(self);
+        unsafe {
+            Self::drop_raw(ptr);
+        }
+    }
+
+    pub async fn cancel(self) -> Option<R> {
+        unsafe {
+            Self::cancel_raw(self.raw_task.as_ptr());
+        }
+        self.await
+    }
+
+    unsafe fn cancel_raw(ptr: *const ()) {
         let header = ptr as *const Header;
 
-        unsafe {
-            let mut state = (*header).state.load(Ordering::Acquire);
+        let mut state = (*header).state.load(Ordering::Acquire);
 
-            loop {
-                // If the task has been completed or closed, it can't be canceled.
-                if state & (COMPLETED | CLOSED) != 0 {
+        loop {
+            // If the task has been completed or closed, it can't be canceled.
+            if state & (COMPLETED | CLOSED) != 0 {
+                break;
+            }
+
+            // If the task is not scheduled nor running, we'll need to schedule it.
+            let new = if state & (SCHEDULED | RUNNING) == 0 {
+                (state | SCHEDULED | CLOSED) + REFERENCE
+            } else {
+                state | CLOSED
+            };
+
+            // Mark the task as closed.
+            match (*header).state.compare_exchange_weak(
+                state,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    // If the task is not scheduled nor running, schedule it one more time so
+                    // that its future gets dropped by the executor.
+                    if state & (SCHEDULED | RUNNING) == 0 {
+                        ((*header).vtable.schedule)(ptr);
+                    }
+
+                    // Notify the awaiter that the task has been closed.
+                    if state & AWAITER != 0 {
+                        (*header).notify(None);
+                    }
+
                     break;
                 }
-
-                // If the task is not scheduled nor running, we'll need to schedule it.
-                let new = if state & (SCHEDULED | RUNNING) == 0 {
-                    (state | SCHEDULED | CLOSED) + REFERENCE
-                } else {
-                    state | CLOSED
-                };
-
-                // Mark the task as closed.
-                match (*header).state.compare_exchange_weak(
-                    state,
-                    new,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // If the task is not scheduled nor running, schedule it one more time so
-                        // that its future gets dropped by the executor.
-                        if state & (SCHEDULED | RUNNING) == 0 {
-                            ((*header).vtable.schedule)(ptr);
-                        }
-
-                        // Notify the awaiter that the task has been closed.
-                        if state & AWAITER != 0 {
-                            (*header).notify(None);
-                        }
-
-                        break;
-                    }
-                    Err(s) => state = s,
-                }
+                Err(s) => state = s,
             }
         }
     }
-}
 
-impl<R> Drop for JoinHandle<R> {
-    fn drop(&mut self) {
-        let ptr = self.raw_task.as_ptr();
+    unsafe fn drop_raw(ptr: *const ()) {
         let header = ptr as *const Header;
 
         // A place where the output will be stored in case it needs to be dropped.
         let mut output = None;
 
-        unsafe {
-            // Optimistically assume the `JoinHandle` is being dropped just after creating the
-            // task. This is a common case so if the handle is not used, the overhead of it is only
-            // one compare-exchange operation.
-            if let Err(mut state) = (*header).state.compare_exchange_weak(
-                SCHEDULED | HANDLE | REFERENCE,
-                SCHEDULED | REFERENCE,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                loop {
-                    // If the task has been completed but not yet closed, that means its output
-                    // must be dropped.
-                    if state & COMPLETED != 0 && state & CLOSED == 0 {
-                        // Mark the task as closed in order to grab its output.
-                        match (*header).state.compare_exchange_weak(
-                            state,
-                            state | CLOSED,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // Read the output.
-                                output =
-                                    Some((((*header).vtable.get_output)(ptr) as *mut R).read());
+        // Optimistically assume the `JoinHandle` is being detached just after creating the
+        // task. This is a common case so if the handle is not used, the overhead of it is only
+        // one compare-exchange operation.
+        if let Err(mut state) = (*header).state.compare_exchange_weak(
+            SCHEDULED | HANDLE | REFERENCE,
+            SCHEDULED | REFERENCE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            loop {
+                // If the task has been completed but not yet closed, that means its output
+                // must be dropped.
+                if state & COMPLETED != 0 && state & CLOSED == 0 {
+                    // Mark the task as closed in order to grab its output.
+                    match (*header).state.compare_exchange_weak(
+                        state,
+                        state | CLOSED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // Read the output.
+                            output = Some((((*header).vtable.get_output)(ptr) as *mut R).read());
 
-                                // Update the state variable because we're continuing the loop.
-                                state |= CLOSED;
-                            }
-                            Err(s) => state = s,
+                            // Update the state variable because we're continuing the loop.
+                            state |= CLOSED;
                         }
+                        Err(s) => state = s,
+                    }
+                } else {
+                    // If this is the last reference to the task and it's not closed, then
+                    // close it and schedule one more time so that its future gets dropped by
+                    // the executor.
+                    let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
+                        SCHEDULED | CLOSED | REFERENCE
                     } else {
-                        // If this is the last reference to the task and it's not closed, then
-                        // close it and schedule one more time so that its future gets dropped by
-                        // the executor.
-                        let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
-                            SCHEDULED | CLOSED | REFERENCE
-                        } else {
-                            state & !HANDLE
-                        };
+                        state & !HANDLE
+                    };
 
-                        // Unset the handle flag.
-                        match (*header).state.compare_exchange_weak(
-                            state,
-                            new,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // If this is the last reference to the task, we need to either
-                                // schedule dropping its future or destroy it.
-                                if state & !(REFERENCE - 1) == 0 {
-                                    if state & CLOSED == 0 {
-                                        ((*header).vtable.schedule)(ptr);
-                                    } else {
-                                        ((*header).vtable.destroy)(ptr);
-                                    }
+                    // Unset the handle flag.
+                    match (*header).state.compare_exchange_weak(
+                        state,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // If this is the last reference to the task, we need to either
+                            // schedule dropping its future or destroy it.
+                            if state & !(REFERENCE - 1) == 0 {
+                                if state & CLOSED == 0 {
+                                    ((*header).vtable.schedule)(ptr);
+                                } else {
+                                    ((*header).vtable.destroy)(ptr);
                                 }
-
-                                break;
                             }
-                            Err(s) => state = s,
+
+                            break;
                         }
+                        Err(s) => state = s,
                     }
                 }
             }
@@ -160,6 +162,16 @@ impl<R> Drop for JoinHandle<R> {
 
         // Drop the output if it was taken out of the task.
         drop(output);
+    }
+}
+
+impl<R> Drop for JoinHandle<R> {
+    fn drop(&mut self) {
+        let ptr = self.raw_task.as_ptr();
+        unsafe {
+            Self::cancel_raw(ptr);
+            Self::drop_raw(ptr);
+        }
     }
 }
 

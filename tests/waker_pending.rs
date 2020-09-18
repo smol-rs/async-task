@@ -164,13 +164,6 @@ fn cancel_during_run() {
 
         thread::sleep(ms(200));
 
-        handle.cancel();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
-
         drop(handle);
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -220,13 +213,6 @@ fn wake_and_cancel_during_run() {
         assert_eq!(DROP_S.load(), 0);
         assert_eq!(chan.len(), 0);
 
-        handle.cancel();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
-
         drop(handle);
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -269,13 +255,6 @@ fn cancel_and_wake_during_run() {
 
         thread::sleep(ms(200));
 
-        handle.cancel();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
-
         drop(handle);
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -310,7 +289,7 @@ fn drop_last_waker() {
     task.run();
     let w = waker();
 
-    drop(handle);
+    handle.detach();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
@@ -346,7 +325,7 @@ fn cancel_last_handle() {
     assert_eq!(DROP_S.load(), 0);
     assert_eq!(chan.len(), 0);
 
-    handle.cancel();
+    drop(handle);
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);
@@ -354,13 +333,6 @@ fn cancel_last_handle() {
     assert_eq!(chan.len(), 1);
 
     chan.recv().unwrap().run();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 1);
-    assert_eq!(DROP_F.load(), 1);
-    assert_eq!(DROP_S.load(), 0);
-    assert_eq!(chan.len(), 0);
-
-    drop(handle);
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
@@ -382,7 +354,7 @@ fn drop_last_handle() {
     assert_eq!(DROP_S.load(), 0);
     assert_eq!(chan.len(), 0);
 
-    drop(handle);
+    handle.detach();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 0);

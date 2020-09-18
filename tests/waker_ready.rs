@@ -109,7 +109,8 @@ fn ms(ms: u64) -> Duration {
 fn wake() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (mut task, _) = async_task::spawn(f, s);
+    let (mut task, handle) = async_task::spawn(f, s);
+    handle.detach();
 
     assert!(chan.is_empty());
 
@@ -147,7 +148,8 @@ fn wake() {
 fn wake_by_ref() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (mut task, _) = async_task::spawn(f, s);
+    let (mut task, handle) = async_task::spawn(f, s);
+    handle.detach();
 
     assert!(chan.is_empty());
 
@@ -185,7 +187,8 @@ fn wake_by_ref() {
 fn clone() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (mut task, _) = async_task::spawn(f, s);
+    let (mut task, handle) = async_task::spawn(f, s);
+    handle.detach();
 
     task.run();
     assert_eq!(POLL.load(), 1);
@@ -220,10 +223,11 @@ fn clone() {
 }
 
 #[test]
-fn wake_canceled() {
+fn wake_dropped() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, _) = async_task::spawn(f, s);
+    let (task, handle) = async_task::spawn(f, s);
+    handle.detach();
 
     task.run();
     assert_eq!(POLL.load(), 1);
@@ -235,7 +239,7 @@ fn wake_canceled() {
     let w = waker();
 
     w.wake_by_ref();
-    chan.recv().unwrap().cancel();
+    drop(chan.recv().unwrap());
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 1);
     assert_eq!(DROP_F.load(), 1);
@@ -254,7 +258,8 @@ fn wake_canceled() {
 fn wake_completed() {
     future!(f, waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
-    let (task, _) = async_task::spawn(f, s);
+    let (task, handle) = async_task::spawn(f, s);
+    handle.detach();
 
     task.run();
     let w = waker();

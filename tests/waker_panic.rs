@@ -132,7 +132,7 @@ fn wake_during_run() {
         thread::sleep(ms(200));
 
         w.wake();
-        drop(handle);
+        handle.detach();
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
         assert_eq!(DROP_F.load(), 0);
@@ -173,13 +173,6 @@ fn cancel_during_run() {
         });
 
         thread::sleep(ms(200));
-
-        handle.cancel();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
 
         drop(handle);
         assert_eq!(POLL.load(), 2);
@@ -230,13 +223,6 @@ fn wake_and_cancel_during_run() {
         assert_eq!(DROP_S.load(), 0);
         assert_eq!(chan.len(), 0);
 
-        handle.cancel();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
-
         drop(handle);
         assert_eq!(POLL.load(), 2);
         assert_eq!(SCHEDULE.load(), 1);
@@ -278,13 +264,6 @@ fn cancel_and_wake_during_run() {
         });
 
         thread::sleep(ms(200));
-
-        handle.cancel();
-        assert_eq!(POLL.load(), 2);
-        assert_eq!(SCHEDULE.load(), 1);
-        assert_eq!(DROP_F.load(), 0);
-        assert_eq!(DROP_S.load(), 0);
-        assert_eq!(chan.len(), 0);
 
         drop(handle);
         assert_eq!(POLL.load(), 2);

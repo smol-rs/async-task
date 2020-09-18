@@ -79,7 +79,7 @@ macro_rules! schedule {
 }
 
 #[test]
-fn cancel_and_drop_handle() {
+fn drop_and_detach() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
@@ -89,13 +89,26 @@ fn cancel_and_drop_handle() {
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
 
-    task.cancel();
+    drop(task);
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
 
-    drop(handle);
+    handle.detach();
+    assert_eq!(POLL.load(), 0);
+    assert_eq!(SCHEDULE.load(), 0);
+    assert_eq!(DROP_F.load(), 1);
+    assert_eq!(DROP_S.load(), 1);
+}
+
+#[test]
+fn detach_and_drop() {
+    future!(f, POLL, DROP_F);
+    schedule!(s, SCHEDULE, DROP_S);
+    let (task, handle) = async_task::spawn(f, s);
+
+    handle.detach();
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
@@ -109,12 +122,12 @@ fn cancel_and_drop_handle() {
 }
 
 #[test]
-fn run_and_drop_handle() {
+fn detach_and_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
 
-    drop(handle);
+    handle.detach();
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
@@ -128,18 +141,18 @@ fn run_and_drop_handle() {
 }
 
 #[test]
-fn drop_handle_and_run() {
+fn run_and_detach() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
 
-    drop(handle);
-    assert_eq!(POLL.load(), 0);
+    task.run();
+    assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 0);
+    assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
 
-    task.run();
+    handle.detach();
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
@@ -151,12 +164,6 @@ fn cancel_and_run() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
     let (task, handle) = async_task::spawn(f, s);
-
-    handle.cancel();
-    assert_eq!(POLL.load(), 0);
-    assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 0);
-    assert_eq!(DROP_S.load(), 0);
 
     drop(handle);
     assert_eq!(POLL.load(), 0);
@@ -183,12 +190,6 @@ fn run_and_cancel() {
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
 
-    handle.cancel();
-    assert_eq!(POLL.load(), 1);
-    assert_eq!(SCHEDULE.load(), 0);
-    assert_eq!(DROP_F.load(), 1);
-    assert_eq!(DROP_S.load(), 0);
-
     drop(handle);
     assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
@@ -200,31 +201,28 @@ fn run_and_cancel() {
 fn cancel_and_poll() {
     future!(f, POLL, DROP_F);
     schedule!(s, SCHEDULE, DROP_S);
-    let (task, handle) = async_task::spawn(f, s);
+    let (task, mut handle) = async_task::spawn(f, s);
 
-    handle.cancel();
+    assert!((&mut handle).now_or_never().is_none());
     assert_eq!(POLL.load(), 0);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 0);
     assert_eq!(DROP_S.load(), 0);
 
-    let mut handle = handle;
-    assert!((&mut handle).now_or_never().is_none());
-
     task.run();
-    assert_eq!(POLL.load(), 0);
+    assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
 
     assert!((&mut handle).now_or_never().is_some());
-    assert_eq!(POLL.load(), 0);
+    assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 0);
 
     drop(handle);
-    assert_eq!(POLL.load(), 0);
+    assert_eq!(POLL.load(), 1);
     assert_eq!(SCHEDULE.load(), 0);
     assert_eq!(DROP_F.load(), 1);
     assert_eq!(DROP_S.load(), 1);
