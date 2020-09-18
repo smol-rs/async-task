@@ -5,7 +5,6 @@ use std::panic::catch_unwind;
 use std::thread;
 
 use async_task::{JoinHandle, Task};
-use crossbeam::channel::{unbounded, Sender};
 use futures_lite::future;
 use once_cell::sync::Lazy;
 
@@ -16,8 +15,8 @@ where
     R: Send + 'static,
 {
     // A channel that holds scheduled tasks.
-    static QUEUE: Lazy<Sender<Task>> = Lazy::new(|| {
-        let (sender, receiver) = unbounded::<Task>();
+    static QUEUE: Lazy<flume::Sender<Task>> = Lazy::new(|| {
+        let (sender, receiver) = flume::unbounded::<Task>();
 
         // Start the executor thread.
         thread::spawn(|| {

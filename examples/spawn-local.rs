@@ -5,11 +5,10 @@ use std::future::Future;
 use std::rc::Rc;
 
 use async_task::{JoinHandle, Task};
-use crossbeam::channel::{unbounded, Receiver, Sender};
 
 thread_local! {
     // A channel that holds scheduled tasks.
-    static QUEUE: (Sender<Task>, Receiver<Task>) = unbounded();
+    static QUEUE: (flume::Sender<Task>, flume::Receiver<Task>) = flume::unbounded();
 }
 
 /// Spawns a future on the executor.
@@ -35,8 +34,8 @@ where
     R: 'static,
 {
     // Spawn a task that sends its result through a channel.
-    let (s, r) = unbounded();
-    spawn(async move { s.send(future.await).unwrap() }).detach();
+    let (s, r) = flume::unbounded();
+    spawn(async move { drop(s.send(future.await)) }).detach();
 
     loop {
         // If the original task has completed, return its result.

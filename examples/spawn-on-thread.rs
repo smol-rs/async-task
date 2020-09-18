@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::thread;
 
 use async_task::JoinHandle;
-use crossbeam::channel;
 use futures_lite::future;
 
 /// Spawns a future on a new dedicated thread.
@@ -17,7 +16,7 @@ where
     R: Send + 'static,
 {
     // Create a channel that holds the task when it is scheduled for running.
-    let (sender, receiver) = channel::unbounded();
+    let (sender, receiver) = flume::unbounded();
     let sender = Arc::new(sender);
     let s = Arc::downgrade(&sender);
 

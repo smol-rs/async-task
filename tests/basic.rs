@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use async_task::Task;
-use crossbeam::channel;
 use futures_lite::future;
 
 // Creates a future with event counters.
@@ -228,7 +227,7 @@ fn cancel_join() {
 
 #[test]
 fn schedule() {
-    let (s, r) = channel::unbounded();
+    let (s, r) = flume::unbounded();
     let schedule = move |t| s.send(t).unwrap();
     let (task, _handle) = async_task::spawn(future::poll_fn(|_| Poll::<()>::Pending), schedule);
 
@@ -250,7 +249,7 @@ fn schedule() {
 fn schedule_counter() {
     static COUNT: AtomicUsize = AtomicUsize::new(0);
 
-    let (s, r) = channel::unbounded();
+    let (s, r) = flume::unbounded();
     let schedule = move |t: Task| {
         COUNT.fetch_add(1, Ordering::SeqCst);
         s.send(t).unwrap();
@@ -284,7 +283,7 @@ fn drop_inside_schedule() {
 
 #[test]
 fn waker() {
-    let (s, r) = channel::unbounded();
+    let (s, r) = flume::unbounded();
     let schedule = move |t| s.send(t).unwrap();
     let (task, _handle) = async_task::spawn(future::poll_fn(|_| Poll::<()>::Pending), schedule);
 
@@ -297,13 +296,4 @@ fn waker() {
     task.run();
     w.wake();
     r.recv().unwrap();
-}
-
-#[test]
-fn raw() {
-    let (task, _handle) = async_task::spawn(async {}, |_| panic!());
-
-    let a = task.into_raw();
-    let task = unsafe { Task::from_raw(a) };
-    task.run();
 }

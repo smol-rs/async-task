@@ -33,15 +33,13 @@ use crate::JoinHandle;
 /// # Examples
 ///
 /// ```
-/// use crossbeam::channel;
-///
 /// // The future inside the task.
 /// let future = async {
 ///     println!("Hello, world!");
 /// };
 ///
 /// // If the task gets woken up, it will be sent into this channel.
-/// let (s, r) = channel::unbounded();
+/// let (s, r) = flume::unbounded();
 /// let schedule = move |task| s.send(task).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
@@ -94,15 +92,13 @@ where
 /// # Examples
 ///
 /// ```
-/// use crossbeam::channel;
-///
 /// // The future inside the task.
 /// let future = async {
 ///     println!("Hello, world!");
 /// };
 ///
 /// // If the task gets woken up, it will be sent into this channel.
-/// let (s, r) = channel::unbounded();
+/// let (s, r) = flume::unbounded();
 /// let schedule = move |task| s.send(task).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
@@ -264,24 +260,6 @@ impl Task {
         unsafe {
             let raw_waker = ((*header).vtable.clone_waker)(ptr);
             Waker::from_raw(raw_waker)
-        }
-    }
-
-    /// Converts this task into a raw pointer.
-    pub fn into_raw(self) -> *mut () {
-        let ptr = self.raw_task.as_ptr();
-        mem::forget(self);
-        ptr
-    }
-
-    /// Converts a raw pointer into a task.
-    ///
-    /// This method should only be used with raw pointers returned from [`into_raw`].
-    ///
-    /// [`into_raw`]: #method.into_raw
-    pub unsafe fn from_raw(raw: *mut ()) -> Task {
-        Task {
-            raw_task: NonNull::new_unchecked(raw as *mut ()),
         }
     }
 }

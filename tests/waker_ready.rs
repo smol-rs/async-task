@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use async_task::Task;
 use atomic_waker::AtomicWaker;
-use crossbeam::channel;
 
 // Creates a future with event counters.
 //
@@ -72,7 +71,7 @@ macro_rules! schedule {
         static $sched: AtomicUsize = AtomicUsize::new(0);
 
         let ($name, $chan) = {
-            let (s, r) = channel::unbounded();
+            let (s, r) = flume::unbounded();
 
             struct Guard(Box<i32>);
 
