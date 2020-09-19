@@ -34,7 +34,7 @@ use crate::Task;
 ///     println!("Hello, world!");
 /// };
 ///
-/// // If the task gets woken up, it will be sent into this channel.
+/// // A function that schedules the task when it gets woken up.
 /// let (s, r) = flume::unbounded();
 /// let schedule = move |runnable| s.send(runnable).unwrap();
 ///
@@ -52,32 +52,31 @@ where
 
 /// Creates a new local task.
 ///
-/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
-/// output.
+/// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
+/// [`Runnable`] is used or dropped on another thread, a panic will occur.
 ///
-/// Method [`Runnable::run()`] polls the `future` once. Then, the [`Runnable`] vanishes and
-/// only reappears when its [`Waker`] wakes the task, thus scheduling it to be run again.
-///
-/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
-/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
-/// should push it into a task queue so that it can be processed later.
-///
-/// Unlike [`spawn()`], this function does not require the `future` to implement [`Send`]. If the
-/// [`Runnable`] reference is run or dropped on a thread it was not created on, a panic will occur.
-///
-/// **NOTE:** This function is only available when the `std` feature for this crate is enabled (it
-/// is by default).
+/// This function is only available when the `std` feature for this crate is enabled.
 ///
 /// # Examples
 ///
 /// ```
-/// // The future inside the task.
-/// let future = async {
-///     println!("Hello, world!");
+/// use async_task::Runnable;
+/// use flume::{Receiver, Sender};
+/// use std::rc::Rc;
+///
+/// thread_local! {
+///     // A queue that holds scheduled tasks.
+///     static QUEUE: (Sender<Runnable>, Receiver<Runnable>) = flume::unbounded();
+/// }
+///
+/// // Make a non-Send future.
+/// let msg: Rc<str> = "Hello, world!".into();
+/// let future = async move {
+///     println!("{}", msg);
 /// };
 ///
-/// // If the task gets woken up, it will be sent into this channel.
-/// let (s, r) = flume::unbounded();
+/// // A function that schedules the task when it gets woken up.
+/// let s = QUEUE.with(|(s, _)| s.clone());
 /// let schedule = move |runnable| s.send(runnable).unwrap();
 ///
 /// // Create a task with the future and the schedule function.
@@ -142,19 +141,19 @@ where
     unsafe { spawn_unchecked(future, schedule) }
 }
 
-/// Creates a new task.
+/// Creates a new task without [`Send`] or `'static` bounds.
 ///
-/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
-/// output.
+/// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
+/// `'static` on `future` and `schedule`.
 ///
-/// Method [`Runnable::run()`] polls the `future` once. Then, the [`Runnable`] vanishes and
-/// only reappears when its [`Waker`] wakes the task, thus scheduling it to be run again.
+/// Safety requirements:
 ///
-/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
-/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
-/// should push it into a task queue so that it can be processed later.
-///
-/// Safe but more restrictive variants of this function are [`spawn()`] or [`spawn_local()`].
+/// - If `future` is not [`Send`], its [`Runnable`] must be used and dropped on the original
+///   thread.
+/// - If `future` is not `'static`, borrowed variables must outlive its [`Runnable`].
+/// - If `schedule` is not [`Send`] and [`Sync`], the task's [`Waker`] must be used and dropped on
+///   the original thread.
+/// - If `schedule` is not `'static`, borrowed variables must outlive the task's [`Waker`].
 ///
 /// # Examples
 ///
