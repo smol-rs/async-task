@@ -13,17 +13,18 @@ use crate::Task;
 
 /// Creates a new task.
 ///
-/// This constructor returns a [`Runnable`] reference that runs the future and a [`Task`]
-/// that awaits its result.
+/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
+/// output.
 ///
-/// When run, the task polls `future`. When woken up, it gets scheduled for running by the
-/// `schedule` function.
+/// Method [`Runnable::run()`] polls the `future` once. Then, the [`Runnable`] vanishes and
+/// only reappears when its [`Waker`] wakes the task, thus scheduling it to be run again.
 ///
-/// The schedule function should not attempt to run the task nor to drop it. Instead, it should
-/// push the task into some kind of queue so that it can be processed later.
+/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
+/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
+/// should push it into a task queue so that it can be processed later.
 ///
-/// If you need to spawn a future that does not implement [`Send`], consider using the
-/// [`spawn_local`] function instead.
+/// If you need to spawn a future that does not implement [`Send`] or isn't `'static`, consider
+/// using [`spawn_local()`] or [`spawn_unchecked()`] instead.
 ///
 /// # Examples
 ///
@@ -40,40 +41,28 @@ use crate::Task;
 /// // Create a task with the future and the schedule function.
 /// let (runnable, task) = async_task::spawn(future, schedule);
 /// ```
-pub fn spawn<F, T, S>(future: F, schedule: S) -> (Runnable, Task<T>)
+pub fn spawn<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
 where
-    F: Future<Output = T> + Send + 'static,
-    T: Send + 'static,
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
     S: Fn(Runnable) + Send + Sync + 'static,
 {
-    // Allocate large futures on the heap.
-    let raw_task = if mem::size_of::<F>() >= 2048 {
-        let future = alloc::boxed::Box::pin(future);
-        RawTask::<_, T, S>::allocate(future, schedule)
-    } else {
-        RawTask::<F, T, S>::allocate(future, schedule)
-    };
-
-    let runnable = Runnable { raw_task };
-    let task = Task {
-        raw_task,
-        _marker: PhantomData,
-    };
-    (runnable, task)
+    unsafe { spawn_unchecked(future, schedule) }
 }
 
 /// Creates a new local task.
 ///
-/// This constructor returns a [`Runnable`] reference that runs the future and a [`Task`]
-/// that awaits its result.
+/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
+/// output.
 ///
-/// When run, the task polls `future`. When woken up, it gets scheduled for running by the
-/// `schedule` function.
+/// Method [`Runnable::run()`] polls the `future` once. Then, the [`Runnable`] vanishes and
+/// only reappears when its [`Waker`] wakes the task, thus scheduling it to be run again.
 ///
-/// The schedule function should not attempt to run the task nor to drop it. Instead, it should
-/// push the task into some kind of queue so that it can be processed later.
+/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
+/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
+/// should push it into a task queue so that it can be processed later.
 ///
-/// Unlike [`spawn`], this function does not require the future to implement [`Send`]. If the
+/// Unlike [`spawn()`], this function does not require the `future` to implement [`Send`]. If the
 /// [`Runnable`] reference is run or dropped on a thread it was not created on, a panic will occur.
 ///
 /// **NOTE:** This function is only available when the `std` feature for this crate is enabled (it
@@ -95,10 +84,10 @@ where
 /// let (runnable, task) = async_task::spawn_local(future, schedule);
 /// ```
 #[cfg(feature = "std")]
-pub fn spawn_local<F, T, S>(future: F, schedule: S) -> (Runnable, Task<T>)
+pub fn spawn_local<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
 where
-    F: Future<Output = T> + 'static,
-    T: 'static,
+    F: Future + 'static,
+    F::Output: 'static,
     S: Fn(Runnable) + Send + Sync + 'static,
 {
     use std::mem::ManuallyDrop;
@@ -144,23 +133,60 @@ where
         }
     }
 
-    // Wrap the future into one that which thread it's on.
+    // Wrap the future into one that checks which thread it's on.
     let future = Checked {
         id: thread_id(),
         inner: ManuallyDrop::new(future),
     };
 
+    unsafe { spawn_unchecked(future, schedule) }
+}
+
+/// Creates a new task.
+///
+/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
+/// output.
+///
+/// Method [`Runnable::run()`] polls the `future` once. Then, the [`Runnable`] vanishes and
+/// only reappears when its [`Waker`] wakes the task, thus scheduling it to be run again.
+///
+/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
+/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
+/// should push it into a task queue so that it can be processed later.
+///
+/// Safe but more restrictive variants of this function are [`spawn()`] or [`spawn_local()`].
+///
+/// # Examples
+///
+/// ```
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
+///
+/// // If the task gets woken up, it will be sent into this channel.
+/// let (s, r) = flume::unbounded();
+/// let schedule = move |runnable| s.send(runnable).unwrap();
+///
+/// // Create a task with the future and the schedule function.
+/// let (runnable, task) = unsafe { async_task::spawn_unchecked(future, schedule) };
+/// ```
+pub unsafe fn spawn_unchecked<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
+where
+    F: Future,
+    S: Fn(Runnable),
+{
     // Allocate large futures on the heap.
-    let raw_task = if mem::size_of::<F>() >= 2048 {
+    let ptr = if mem::size_of::<F>() >= 2048 {
         let future = alloc::boxed::Box::pin(future);
-        RawTask::<_, T, S>::allocate(future, schedule)
+        RawTask::<_, F::Output, S>::allocate(future, schedule)
     } else {
-        RawTask::<_, T, S>::allocate(future, schedule)
+        RawTask::<F, F::Output, S>::allocate(future, schedule)
     };
 
-    let runnable = Runnable { raw_task };
+    let runnable = Runnable { ptr };
     let task = Task {
-        raw_task,
+        ptr,
         _marker: PhantomData,
     };
     (runnable, task)
@@ -182,9 +208,17 @@ where
 /// canceled.  When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. It is
 /// possible for the [`Task`] to cancel while the [`Runnable`] reference exists, in which
 /// case an attempt to run the task won't do anything.
+///
+/// ----------------
+///
+/// A runnable future, ready for execution.
+///
+/// Once a `Runnable` is run, it "vanishes" and only reappears when its future is woken. When it's
+/// woken up, its schedule function is called, which means the `Runnable` gets pushed into a task
+/// queue in an executor.
 pub struct Runnable {
     /// A pointer to the heap-allocated task.
-    pub(crate) raw_task: NonNull<()>,
+    pub(crate) ptr: NonNull<()>,
 }
 
 unsafe impl Send for Runnable {}
@@ -203,7 +237,7 @@ impl Runnable {
     ///
     /// If the task is canceled, this method won't do anything.
     pub fn schedule(self) {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
         mem::forget(self);
 
@@ -226,9 +260,10 @@ impl Runnable {
     ///
     /// It is possible that polling the future panics, in which case the panic will be propagated
     /// into the caller. It is advised that invocations of this method are wrapped inside
-    /// [`catch_unwind`]. If a panic occurs, the task is automatically canceled.
+    /// [`catch_unwind`][`std::panic::catch_unwind`]. If a panic occurs, the task is automatically
+    /// canceled.
     pub fn run(self) -> bool {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
         mem::forget(self);
 
@@ -237,7 +272,7 @@ impl Runnable {
 
     /// Returns a waker associated with this task.
     pub fn waker(&self) -> Waker {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
@@ -249,12 +284,29 @@ impl Runnable {
 
 impl Drop for Runnable {
     fn drop(&mut self) {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
-            // Cancel the task.
-            (*header).cancel();
+            let mut state = (*header).state.load(Ordering::Acquire);
+
+            loop {
+                // If the task has been completed or closed, it can't be canceled.
+                if state & (COMPLETED | CLOSED) != 0 {
+                    break;
+                }
+
+                // Mark the task as closed.
+                match (*header).state.compare_exchange_weak(
+                    state,
+                    state | CLOSED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => break,
+                    Err(s) => state = s,
+                }
+            }
 
             // Drop the future.
             ((*header).vtable.drop_future)(ptr);
@@ -268,14 +320,14 @@ impl Drop for Runnable {
             }
 
             // Drop the task reference.
-            ((*header).vtable.drop_task)(ptr);
+            ((*header).vtable.drop_ref)(ptr);
         }
     }
 }
 
 impl fmt::Debug for Runnable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         f.debug_struct("Runnable")

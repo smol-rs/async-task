@@ -5,8 +5,8 @@ use std::panic::catch_unwind;
 use std::thread;
 
 use async_task::{Runnable, Task};
-use futures_lite::future;
 use once_cell::sync::Lazy;
+use smol::future;
 
 /// Spawns a future on the executor.
 fn spawn<F, T>(future: F) -> Task<T>
@@ -14,7 +14,7 @@ where
     F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
-    // A channel that holds scheduled tasks.
+    // A queue that holds scheduled tasks.
     static QUEUE: Lazy<flume::Sender<Runnable>> = Lazy::new(|| {
         let (sender, receiver) = flume::unbounded::<Runnable>();
 
@@ -29,11 +29,11 @@ where
         sender
     });
 
-    // Create a task that is scheduled by sending itself into the channel.
+    // Create a task that is scheduled by pushing it into the queue.
     let schedule = |t| QUEUE.send(t).unwrap();
     let (runnable, task) = async_task::spawn(future, schedule);
 
-    // Schedule the task by sending it into the channel.
+    // Schedule the task by pushing it into the queue.
     runnable.schedule();
 
     task

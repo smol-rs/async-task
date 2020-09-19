@@ -23,8 +23,8 @@ pub(crate) struct TaskVTable {
     /// Returns a pointer to the output stored after completion.
     pub(crate) get_output: unsafe fn(*const ()) -> *const (),
 
-    /// Drops the task.
-    pub(crate) drop_task: unsafe fn(ptr: *const ()),
+    /// Drops the task reference (`Runnable` or `Waker`).
+    pub(crate) drop_ref: unsafe fn(ptr: *const ()),
 
     /// Destroys the task.
     pub(crate) destroy: unsafe fn(*const ()),
@@ -82,8 +82,8 @@ impl<F, T, S> Clone for RawTask<F, T, S> {
 
 impl<F, T, S> RawTask<F, T, S>
 where
-    F: Future<Output = T> + 'static,
-    S: Fn(Runnable) + Send + Sync + 'static,
+    F: Future<Output = T>,
+    S: Fn(Runnable),
 {
     const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
@@ -94,29 +94,29 @@ where
 
     /// Allocates a task with the given `future` and `schedule` function.
     ///
-    /// It is assumed that initially only the `Runnable` reference and the `Task` exist.
+    /// It is assumed that initially only the `Runnable` and the `Task` exist.
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
         // Compute the layout of the task for allocation. Abort if the computation fails.
         let task_layout = abort_on_panic(|| Self::task_layout());
 
         unsafe {
             // Allocate enough space for the entire task.
-            let raw_task = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
+            let ptr = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
                 None => abort(),
                 Some(p) => p,
             };
 
-            let raw = Self::from_ptr(raw_task.as_ptr());
+            let raw = Self::from_ptr(ptr.as_ptr());
 
             // Write the header as the first field of the task.
             (raw.header as *mut Header).write(Header {
-                state: AtomicUsize::new(SCHEDULED | HANDLE | REFERENCE),
+                state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
                 awaiter: UnsafeCell::new(None),
                 vtable: &TaskVTable {
                     schedule: Self::schedule,
                     drop_future: Self::drop_future,
                     get_output: Self::get_output,
-                    drop_task: Self::drop_task,
+                    drop_ref: Self::drop_ref,
                     destroy: Self::destroy,
                     run: Self::run,
                     clone_waker: Self::clone_waker,
@@ -129,7 +129,7 @@ where
             // Write the future as the fourth field of the task.
             raw.future.write(future);
 
-            raw_task
+            ptr
         }
     }
 
@@ -296,7 +296,7 @@ where
                             // because the schedule function cannot be destroyed while the waker is
                             // still alive.
                             let task = Runnable {
-                                raw_task: NonNull::new_unchecked(ptr as *mut ()),
+                                ptr: NonNull::new_unchecked(ptr as *mut ()),
                             };
                             (*raw.schedule)(task);
                         }
@@ -328,7 +328,7 @@ where
     /// Drops a waker.
     ///
     /// This function will decrement the reference count. If it drops down to zero, the associated
-    /// join handle has been dropped too, and the task has not been completed, then it will get
+    /// `Task` has been dropped too, and the task has not been completed, then it will get
     /// scheduled one more time so that its future gets dropped by the executor.
     #[inline]
     unsafe fn drop_waker(ptr: *const ()) {
@@ -339,7 +339,7 @@ where
 
         // If this was the last reference to the task and the `Task` has been dropped too,
         // then we need to decide how to destroy the task.
-        if new & !(REFERENCE - 1) == 0 && new & HANDLE == 0 {
+        if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
             if new & (COMPLETED | CLOSED) == 0 {
                 // If the task was not completed nor closed, close it and schedule one more time so
                 // that its future gets dropped by the executor.
@@ -354,12 +354,12 @@ where
         }
     }
 
-    /// Drops a task.
+    /// Drops a task reference (`Runnable` or `Waker`).
     ///
     /// This function will decrement the reference count. If it drops down to zero and the
-    /// associated join handle has been dropped too, then the task gets destroyed.
+    /// associated `Task` handle has been dropped too, then the task gets destroyed.
     #[inline]
-    unsafe fn drop_task(ptr: *const ()) {
+    unsafe fn drop_ref(ptr: *const ()) {
         let raw = Self::from_ptr(ptr);
 
         // Decrement the reference count.
@@ -367,7 +367,7 @@ where
 
         // If this was the last reference to the task and the `Task` has been dropped too,
         // then destroy the task.
-        if new & !(REFERENCE - 1) == 0 && new & HANDLE == 0 {
+        if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
             Self::destroy(ptr);
         }
     }
@@ -387,7 +387,7 @@ where
         }
 
         let task = Runnable {
-            raw_task: NonNull::new_unchecked(ptr as *mut ()),
+            ptr: NonNull::new_unchecked(ptr as *mut ()),
         };
         (*raw.schedule)(task);
     }
@@ -457,7 +457,7 @@ where
                 }
 
                 // Drop the task reference.
-                Self::drop_task(ptr);
+                Self::drop_ref(ptr);
                 return false;
             }
 
@@ -494,8 +494,8 @@ where
 
                 // The task is now completed.
                 loop {
-                    // If the handle is dropped, we'll need to close it and drop the output.
-                    let new = if state & HANDLE == 0 {
+                    // If the `Task` is dropped, we'll need to close it and drop the output.
+                    let new = if state & TASK == 0 {
                         (state & !RUNNING & !SCHEDULED) | COMPLETED | CLOSED
                     } else {
                         (state & !RUNNING & !SCHEDULED) | COMPLETED
@@ -509,9 +509,9 @@ where
                         Ordering::Acquire,
                     ) {
                         Ok(_) => {
-                            // If the handle is dropped or if the task was closed while running,
+                            // If the `Task` is dropped or if the task was closed while running,
                             // now it's time to drop the output.
-                            if state & HANDLE == 0 || state & CLOSED != 0 {
+                            if state & TASK == 0 || state & CLOSED != 0 {
                                 // Read the output.
                                 output = Some(raw.output.read());
                             }
@@ -522,7 +522,7 @@ where
                             }
 
                             // Drop the task reference.
-                            Self::drop_task(ptr);
+                            Self::drop_ref(ptr);
                             break;
                         }
                         Err(s) => state = s,
@@ -569,7 +569,7 @@ where
                                     (*raw.header).notify(None);
                                 }
                                 // Drop the task reference.
-                                Self::drop_task(ptr);
+                                Self::drop_ref(ptr);
                             } else if state & SCHEDULED != 0 {
                                 // The thread that woke the task up didn't reschedule it because
                                 // it was running so now it's our responsibility to do so.
@@ -577,7 +577,7 @@ where
                                 return true;
                             } else {
                                 // Drop the task reference.
-                                Self::drop_task(ptr);
+                                Self::drop_ref(ptr);
                             }
                             break;
                         }
@@ -592,13 +592,13 @@ where
         /// A guard that closes the task if polling its future panics.
         struct Guard<F, T, S>(RawTask<F, T, S>)
         where
-            F: Future<Output = T> + 'static,
-            S: Fn(Runnable) + Send + Sync + 'static;
+            F: Future<Output = T>,
+            S: Fn(Runnable);
 
         impl<F, T, S> Drop for Guard<F, T, S>
         where
-            F: Future<Output = T> + 'static,
-            S: Fn(Runnable) + Send + Sync + 'static,
+            F: Future<Output = T>,
+            S: Fn(Runnable),
         {
             fn drop(&mut self) {
                 let raw = self.0;
@@ -626,7 +626,7 @@ where
                             }
 
                             // Drop the task reference.
-                            RawTask::<F, T, S>::drop_task(ptr);
+                            RawTask::<F, T, S>::drop_ref(ptr);
                             break;
                         }
 
@@ -647,7 +647,7 @@ where
                                 }
 
                                 // Drop the task reference.
-                                RawTask::<F, T, S>::drop_task(ptr);
+                                RawTask::<F, T, S>::drop_ref(ptr);
                                 break;
                             }
                             Err(s) => state = s,

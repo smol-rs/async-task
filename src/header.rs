@@ -9,14 +9,14 @@ use crate::utils::abort_on_panic;
 
 /// The header of a task.
 ///
-/// This header is stored right at the beginning of every heap-allocated task.
+/// This header is stored in memory at the beginning of the heap-allocated task.
 pub(crate) struct Header {
     /// Current state of the task.
     ///
     /// Contains flags representing the current state and the reference count.
     pub(crate) state: AtomicUsize,
 
-    /// The task that is blocked on the `Task`.
+    /// The task that is blocked on the `Task` handle.
     ///
     /// This waker needs to be woken up once the task completes or is closed.
     pub(crate) awaiter: UnsafeCell<Option<Waker>>,
@@ -29,49 +29,24 @@ pub(crate) struct Header {
 }
 
 impl Header {
-    /// Cancels the task.
-    ///
-    /// This method will mark the task as closed, but it won't reschedule the task or drop its
-    /// future.
-    pub(crate) fn cancel(&self) {
-        let mut state = self.state.load(Ordering::Acquire);
-
-        loop {
-            // If the task has been completed or closed, it can't be canceled.
-            if state & (COMPLETED | CLOSED) != 0 {
-                break;
-            }
-
-            // Mark the task as closed.
-            match self.state.compare_exchange_weak(
-                state,
-                state | CLOSED,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(s) => state = s,
-            }
-        }
-    }
-
     /// Notifies the awaiter blocked on this task.
     ///
     /// If the awaiter is the same as the current waker, it will not be notified.
     #[inline]
     pub(crate) fn notify(&self, current: Option<&Waker>) {
-        // Mark the awaiter as being notified.
+        // Set the bit indicating that the task is notifying its awaiter.
         let state = self.state.fetch_or(NOTIFYING, Ordering::AcqRel);
 
-        // If the awaiter was not being notified nor registered...
+        // If the task was not notifying or registering an awaiter...
         if state & (NOTIFYING | REGISTERING) == 0 {
             // Take the waker out.
             let waker = unsafe { (*self.awaiter.get()).take() };
 
-            // Mark the state as not being notified anymore nor containing an awaiter.
+            // Unset the bit indicating that the task is notifying its awaiter.
             self.state
                 .fetch_and(!NOTIFYING & !AWAITER, Ordering::Release);
 
+            // Finally, notify the waker if it's different from the current waker.
             if let Some(w) = waker {
                 // We need a safeguard against panics because waking can panic.
                 abort_on_panic(|| match current {
@@ -85,7 +60,7 @@ impl Header {
 
     /// Registers a new awaiter blocked on this task.
     ///
-    /// This method is called when `Task` is polled and the task has not completed.
+    /// This method is called when `Task` is polled and it has not yet completed.
     #[inline]
     pub(crate) fn register(&self, waker: &Waker) {
         // Load the state and synchronize with it.
@@ -169,7 +144,7 @@ impl fmt::Debug for Header {
             .field("completed", &(state & COMPLETED != 0))
             .field("closed", &(state & CLOSED != 0))
             .field("awaiter", &(state & AWAITER != 0))
-            .field("handle", &(state & HANDLE != 0))
+            .field("task", &(state & TASK != 0))
             .field("ref_count", &(state / REFERENCE))
             .finish()
     }

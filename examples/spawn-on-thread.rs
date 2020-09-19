@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::thread;
 
 use async_task::Task;
-use futures_lite::future;
+use smol::future;
 
 /// Spawns a future on a new dedicated thread.
 ///
@@ -27,7 +27,7 @@ where
         future.await
     };
 
-    // Create a task that is scheduled by sending itself into the channel.
+    // Create a task that is scheduled by sending it into the channel.
     let schedule = move |t| s.upgrade().unwrap().send(t).unwrap();
     let (runnable, task) = async_task::spawn(future, schedule);
 

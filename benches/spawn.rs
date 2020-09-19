@@ -2,7 +2,7 @@
 
 extern crate test;
 
-use futures_lite::future;
+use smol::future;
 use test::Bencher;
 
 #[bench]

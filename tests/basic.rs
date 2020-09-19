@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use async_task::Runnable;
-use futures_lite::future;
+use smol::future;
 
 // Creates a future with event counters.
 //

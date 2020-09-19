@@ -10,16 +10,43 @@ use core::task::{Context, Poll};
 use crate::header::Header;
 use crate::state::*;
 
-/// A handle that awaits the result of a task.
+/// A spawned task.
 ///
-/// This type is a future that resolves to an `Option<T>` where:
+/// A [`Task`] can be awaited to retrieve the output of its future.
 ///
-/// * `None` indicates the task has panicked or was canceled.
-/// * `Some(result)` indicates the task has completed with `result` of type `T`.
+/// Dropping a [`Task`] cancels it, which means its future won't be polled again.
+/// To drop the [`Task`] handle without canceling it, use [`detach()`][`Task::detach()`] instead.
+/// To cancel a task gracefully and wait until it is fully destroyed, use the
+/// [`cancel()`][Task::cancel()] method.
+///
+/// Note that canceling a task actually wakes it and reschedules one last time. Then, the executor
+/// can destroy the task by simply dropping its [`Runnable`][`crate::Runnable`] or by invoking
+/// [`run()`][`crate::Runnable::run()`].
+///
+/// # Examples
+///
+/// ```
+/// use smol::{future, Executor};
+/// use std::thread;
+///
+/// let ex = Executor::new();
+///
+/// // Spawn a future onto the executor.
+/// let task = ex.spawn(async {
+///     println!("Hello from a task!");
+///     1 + 2
+/// });
+///
+/// // Run an executor thread.
+/// thread::spawn(move || future::block_on(ex.run(future::pending::<()>())));
+///
+/// // Wait for the task's output.
+/// assert_eq!(future::block_on(task), 3);
+/// ```
 #[must_use = "tasks get canceled when dropped, use `.detach()` to run them in the background"]
 pub struct Task<T> {
     /// A raw task pointer.
-    pub(crate) raw_task: NonNull<()>,
+    pub(crate) ptr: NonNull<()>,
 
     /// A marker capturing generic type `T`.
     pub(crate) _marker: PhantomData<T>,
@@ -36,12 +63,64 @@ impl<T> std::panic::UnwindSafe for Task<T> {}
 impl<T> std::panic::RefUnwindSafe for Task<T> {}
 
 impl<T> Task<T> {
+    /// Detaches the task to let it keep running in the background.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smol::{Executor, Timer};
+    /// use std::time::Duration;
+    ///
+    /// let ex = Executor::new();
+    ///
+    /// // Spawn a deamon future.
+    /// ex.spawn(async {
+    ///     loop {
+    ///         println!("I'm a daemon task looping forever.");
+    ///         Timer::after(Duration::from_secs(1)).await;
+    ///     }
+    /// })
+    /// .detach();
+    /// ```
     pub fn detach(self) {
         let mut this = self;
         let _out = this.set_detached();
         mem::forget(this);
     }
 
+    /// Cancels the task and waits for it to stop running.
+    ///
+    /// Returns the task's output if it was completed just before it got canceled, or [`None`] if
+    /// it didn't complete.
+    ///
+    /// While it's possible to simply drop the [`Task`] to cancel it, this is a cleaner way of
+    /// canceling because it also waits for the task to stop running.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smol::{future, Executor, Timer};
+    /// use std::thread;
+    /// use std::time::Duration;
+    ///
+    /// let ex = Executor::new();
+    ///
+    /// // Spawn a deamon future.
+    /// let task = ex.spawn(async {
+    ///     loop {
+    ///         println!("Even though I'm in an infinite loop, you can still cancel me!");
+    ///         Timer::after(Duration::from_secs(1)).await;
+    ///     }
+    /// });
+    ///
+    /// // Run an executor thread.
+    /// thread::spawn(move || future::block_on(ex.run(future::pending::<()>())));
+    ///
+    /// future::block_on(async {
+    ///     Timer::after(Duration::from_secs(3)).await;
+    ///     task.cancel().await;
+    /// });
+    /// ```
     pub async fn cancel(self) -> Option<T> {
         let mut this = self;
         this.set_canceled();
@@ -52,15 +131,16 @@ impl<T> Task<T> {
             type Output = Option<T>;
 
             fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                self.0.poll_result(cx)
+                self.0.poll_task(cx)
             }
         }
 
         Fut(this).await
     }
 
+    /// Puts the task in canceled state.
     fn set_canceled(&mut self) {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
@@ -106,19 +186,20 @@ impl<T> Task<T> {
         }
     }
 
+    /// Puts the task in detached state.
     fn set_detached(&mut self) -> Option<T> {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
             // A place where the output will be stored in case it needs to be dropped.
             let mut output = None;
 
-            // Optimistically assume the `Task` is being detached just after creating the
-            // task. This is a common case so if the handle is not used, the overhead of it is only
-            // one compare-exchange operation.
+            // Optimistically assume the `Task` is being detached just after creating the task.
+            // This is a common case so if the `Task` is datached, the overhead of it is only one
+            // compare-exchange operation.
             if let Err(mut state) = (*header).state.compare_exchange_weak(
-                SCHEDULED | HANDLE | REFERENCE,
+                SCHEDULED | TASK | REFERENCE,
                 SCHEDULED | REFERENCE,
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -151,10 +232,10 @@ impl<T> Task<T> {
                         let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
                             SCHEDULED | CLOSED | REFERENCE
                         } else {
-                            state & !HANDLE
+                            state & !TASK
                         };
 
-                        // Unset the handle flag.
+                        // Unset the `TASK` flag.
                         match (*header).state.compare_exchange_weak(
                             state,
                             new,
@@ -184,8 +265,18 @@ impl<T> Task<T> {
         }
     }
 
-    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        let ptr = self.raw_task.as_ptr();
+    /// Polls the task to retrieve its output.
+    ///
+    /// Returns `Some` if the task has completed or `None` if it was closed.
+    ///
+    /// A task becomes closed in the following cases:
+    ///
+    /// 1. It gets canceled by `Runnable::drop()`, `Task::drop()`, or `Task::cancel()`.
+    /// 2. Its output gets awaited by the `Task`.
+    /// 3. It panics while polling the future.
+    /// 4. It is completed and the `Task` gets dropped.
+    fn poll_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
@@ -273,7 +364,7 @@ impl<T> Future for Task<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.poll_result(cx) {
+        match self.poll_task(cx) {
             Poll::Ready(t) => Poll::Ready(t.expect("task has failed")),
             Poll::Pending => Poll::Pending,
         }
@@ -282,7 +373,7 @@ impl<T> Future for Task<T> {
 
 impl<T> fmt::Debug for Task<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ptr = self.raw_task.as_ptr();
+        let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         f.debug_struct("Task")

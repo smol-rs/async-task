@@ -7,7 +7,7 @@ use std::rc::Rc;
 use async_task::{Runnable, Task};
 
 thread_local! {
-    // A channel that holds scheduled tasks.
+    // A queue that holds scheduled tasks.
     static QUEUE: (flume::Sender<Runnable>, flume::Receiver<Runnable>) = flume::unbounded();
 }
 
@@ -17,11 +17,11 @@ where
     F: Future<Output = T> + 'static,
     T: 'static,
 {
-    // Create a task that is scheduled by sending itself into the channel.
+    // Create a task that is scheduled by pushing itself into the queue.
     let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
     let (runnable, task) = async_task::spawn_local(future, schedule);
 
-    // Schedule the task by sending it into the queue.
+    // Schedule the task by pushing it into the queue.
     runnable.schedule();
 
     task

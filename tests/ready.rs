@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use async_task::Runnable;
 use easy_parallel::Parallel;
-use futures_lite::future;
+use smol::future;
 
 // Creates a future with event counters.
 //

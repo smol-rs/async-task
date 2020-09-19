@@ -1,7 +1,6 @@
 /// Set if the task is scheduled for running.
 ///
-/// A task is considered to be scheduled whenever its `Runnable` reference exists. It therefore
-/// also begins in scheduled state at the moment of creation.
+/// A task is considered to be scheduled whenever its `Runnable` exists.
 ///
 /// This flag can't be set when the task is completed. However, it can be set while the task is
 /// running, in which case it will be rescheduled as soon as polling finishes.
@@ -27,7 +26,7 @@ pub(crate) const COMPLETED: usize = 1 << 2;
 /// Set if the task is closed.
 ///
 /// If a task is closed, that means it's either canceled or its output has been consumed by the
-/// `Task`. A task becomes closed when:
+/// `Task`. A task becomes closed in the following cases:
 ///
 /// 1. It gets canceled by `Runnable::drop()`, `Task::drop()`, or `Task::cancel()`.
 /// 2. Its output gets awaited by the `Task`.
@@ -39,7 +38,7 @@ pub(crate) const CLOSED: usize = 1 << 3;
 ///
 /// The `Task` is a special case in that it is only tracked by this flag, while all other
 /// task references (`Runnable` and `Waker`s) are tracked by the reference count.
-pub(crate) const HANDLE: usize = 1 << 4;
+pub(crate) const TASK: usize = 1 << 4;
 
 /// Set if the `Task` is awaiting the output.
 ///
@@ -66,5 +65,5 @@ pub(crate) const NOTIFYING: usize = 1 << 7;
 /// total reference count.
 ///
 /// Note that the reference counter only tracks the `Runnable` and `Waker`s. The `Task` is
-/// tracked separately by the `HANDLE` flag.
+/// tracked separately by the `TASK` flag.
 pub(crate) const REFERENCE: usize = 1 << 8;
