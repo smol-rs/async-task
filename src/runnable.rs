@@ -50,7 +50,7 @@ where
     unsafe { spawn_unchecked(future, schedule) }
 }
 
-/// Creates a new local task.
+/// Creates a new thread-local task.
 ///
 /// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
 /// [`Runnable`] is used or dropped on another thread, a panic will occur.
@@ -141,7 +141,7 @@ where
     unsafe { spawn_unchecked(future, schedule) }
 }
 
-/// Creates a new task without [`Send`] or `'static` bounds.
+/// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
 ///
 /// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
 /// `'static` on `future` and `schedule`.
