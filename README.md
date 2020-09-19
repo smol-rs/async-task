@@ -8,12 +8,50 @@ https://github.com/stjepang/async-task)
 https://crates.io/crates/async-task)
 [![Documentation](https://docs.rs/async-task/badge.svg)](
 https://docs.rs/async-task)
-[![Chat](https://img.shields.io/discord/701824908866617385.svg?logo=discord)](
-https://discord.gg/x6m5Vvt)
 
-Task abstraction for [building executors].
+Task abstraction for building executors.
 
-[building executors]: https://stjepang.github.io/2020/01/31/build-your-own-executor.html
+To spawn a future onto an executor, we first need to allocate it on the heap and keep some
+state attached to it. The state indicates whether the future is ready for polling, waiting to
+be woken up, or completed. Such a stateful future is called a *task*.
+
+All executors have a queue that holds scheduled tasks:
+
+```rust
+let (sender, receiver) = flume::unbounded();
+```
+
+A task is created using either `spawn()`, `spawn_local()`, or `spawn_unchecked()` which
+return a `Runnable` and a `Task`:
+
+```rust
+// A future that will be spawned.
+let future = async { 1 + 2 };
+
+// A function that schedules the task when it gets woken up.
+let schedule = move |runnable| sender.send(runnable).unwrap();
+
+// Construct a task.
+let (runnable, task) = async_task::spawn(future, schedule);
+
+// Push the task into the queue by invoking its schedule function.
+runnable.schedule();
+```
+
+The `Runnable` is used to poll the task's future, and the `Task` is used to await its
+output.
+
+Finally, we need a loop that takes scheduled tasks from the queue and runs them:
+
+```rust
+for runnable in receiver {
+    runnable.run();
+}
+```
+
+Method `run()` polls the task's future once. Then, the `Runnable`
+vanishes and only reappears when its `Waker` wakes the task, thus
+scheduling it to be run again.
 
 ## License
 
