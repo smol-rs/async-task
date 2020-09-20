@@ -16,8 +16,9 @@ use crate::Task;
 /// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
 /// output.
 ///
-/// Method [`Runnable::run()`] polls the `future` once. Then, the [`Runnable`] vanishes and
-/// only reappears when its [`Waker`] wakes the task, thus scheduling it to be run again.
+/// Method [`run()`][`Runnable::run()`] polls the task's future once. Then, the [`Runnable`]
+/// vanishes and only reappears when its [`Waker`] wakes the task, thus scheduling it to be run
+/// again.
 ///
 /// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
 /// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
@@ -191,30 +192,44 @@ where
     (runnable, task)
 }
 
-/// A task reference that runs its future.
+/// A handle to a runnable task.
 ///
-/// At any moment in time, there is at most one [`Runnable`] reference associated with a particular
-/// task. Running consumes the [`Runnable`] reference and polls its internal future. If the future
-/// is still pending after getting polled, the [`Runnable`] reference simply won't exist until a
-/// [`Waker`] notifies the task. If the future completes, its result becomes available to the
-/// [`Task`].
+/// Every spawned task has a single [`Runnable`] handle, which only exists when the task is
+/// scheduled for running.
 ///
-/// When a task is woken up, its [`Runnable`] reference is recreated and passed to the schedule
-/// function. In most executors, scheduling simply pushes the [`Runnable`] reference into a queue
-/// of runnable tasks.
+/// Method [`run()`][`Runnable::run()`] polls the task's future once. Then, the [`Runnable`]
+/// vanishes and only reappears when its [`Waker`] wakes the task, thus scheduling it to be run
+/// again.
 ///
-/// If the [`Runnable`] reference is dropped without getting run, the task is automatically
-/// canceled.  When canceled, the task won't be scheduled again even if a [`Waker`] wakes it. It is
-/// possible for the [`Task`] to cancel while the [`Runnable`] reference exists, in which
-/// case an attempt to run the task won't do anything.
+/// Dropping a [`Runnable`] cancels the task, which means its future won't be polled again, and
+/// awaiting the [`Task`] after that will result in a panic.
 ///
-/// ----------------
+/// # Examples
 ///
-/// A runnable future, ready for execution.
+/// ```
+/// use async_task::Runnable;
+/// use once_cell::sync::Lazy;
+/// use std::{panic, thread};
 ///
-/// Once a `Runnable` is run, it "vanishes" and only reappears when its future is woken. When it's
-/// woken up, its schedule function is called, which means the `Runnable` gets pushed into a task
-/// queue in an executor.
+/// // A simple executor.
+/// static QUEUE: Lazy<flume::Sender<Runnable>> = Lazy::new(|| {
+///     let (sender, receiver) = flume::unbounded::<Runnable>();
+///     thread::spawn(|| {
+///         for runnable in receiver {
+///             let _ignore_panic = panic::catch_unwind(|| runnable.run());
+///         }
+///     });
+///     sender
+/// });
+///
+/// // Create a task with a simple future.
+/// let schedule = |runnable| QUEUE.send(runnable).unwrap();
+/// let (runnable, task) = async_task::spawn(async { 1 + 2 }, schedule);
+///
+/// // Schedule the task and await its output.
+/// runnable.schedule();
+/// assert_eq!(smol::future::block_on(task), 3);
+/// ```
 pub struct Runnable {
     /// A pointer to the heap-allocated task.
     pub(crate) ptr: NonNull<()>,
@@ -231,10 +246,23 @@ impl std::panic::RefUnwindSafe for Runnable {}
 impl Runnable {
     /// Schedules the task.
     ///
-    /// This is a convenience method that simply reschedules the task by passing it to its schedule
-    /// function.
+    /// This is a convenience method that passes the [`Runnable`] to the schedule function.
     ///
-    /// If the task is canceled, this method won't do anything.
+    /// # Examples
+    ///
+    /// ```
+    /// // A function that schedules the task when it gets woken up.
+    /// let (s, r) = flume::unbounded();
+    /// let schedule = move |runnable| s.send(runnable).unwrap();
+    ///
+    /// // Create a task with a simple future and the schedule function.
+    /// let (runnable, task) = async_task::spawn(async {}, schedule);
+    ///
+    /// // Schedule the task.
+    /// assert_eq!(r.len(), 0);
+    /// runnable.schedule();
+    /// assert_eq!(r.len(), 1);
+    /// ```
     pub fn schedule(self) {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
@@ -245,22 +273,33 @@ impl Runnable {
         }
     }
 
-    /// Runs the task.
+    /// Runs the task by polling its future.
     ///
-    /// Returns `true` if the task was woken while running, in which case it gets rescheduled at
-    /// the end of this method invocation.
+    /// Returns `true` if the task was woken while running, in which case the [`Runnable`] gets
+    /// rescheduled at the end of this method invocation.
     ///
-    /// This method polls the task's future. If the future completes, its result will become
-    /// available to the [`Task`]. And if the future is still pending, the task will have to
-    /// be woken up in order to be rescheduled and run again.
+    /// Otherwise, returns `true` and the [`Runnable`] vanishes until the task is woken.
     ///
-    /// If the task was canceled by a [`Task`] before it gets run, then this method won't do
-    /// anything.
+    /// If the [`Task`] handle was dropped or if [`cancel()`][`Task::cancel()`] was called, then
+    /// this method simply destroys the task.
     ///
-    /// It is possible that polling the future panics, in which case the panic will be propagated
-    /// into the caller. It is advised that invocations of this method are wrapped inside
-    /// [`catch_unwind`][`std::panic::catch_unwind`]. If a panic occurs, the task is automatically
-    /// canceled.
+    /// If the polled future panics, this method propagates the panic, and awaiting the [`Task`]
+    /// after that will also result in a panic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // A function that schedules the task when it gets woken up.
+    /// let (s, r) = flume::unbounded();
+    /// let schedule = move |runnable| s.send(runnable).unwrap();
+    ///
+    /// // Create a task with a simple future and the schedule function.
+    /// let (runnable, task) = async_task::spawn(async { 1 + 2 }, schedule);
+    ///
+    /// // Run the task and check its output.
+    /// runnable.run();
+    /// assert_eq!(smol::future::block_on(task), 3);
+    /// ```
     pub fn run(self) -> bool {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
@@ -270,6 +309,28 @@ impl Runnable {
     }
 
     /// Returns a waker associated with this task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smol::future;
+    ///
+    /// // A function that schedules the task when it gets woken up.
+    /// let (s, r) = flume::unbounded();
+    /// let schedule = move |runnable| s.send(runnable).unwrap();
+    ///
+    /// // Create a task with a simple future and the schedule function.
+    /// let (runnable, task) = async_task::spawn(future::pending::<()>(), schedule);
+    ///
+    /// // Take a waker and run the task.
+    /// let waker = runnable.waker();
+    /// runnable.run();
+    ///
+    /// // Reschedule the task by waking it.
+    /// assert_eq!(r.len(), 0);
+    /// waker.wake();
+    /// assert_eq!(r.len(), 1);
+    /// ```
     pub fn waker(&self) -> Waker {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;

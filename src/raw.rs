@@ -451,13 +451,19 @@ where
                 // Mark the task as unscheduled.
                 let state = (*raw.header).state.fetch_and(!SCHEDULED, Ordering::AcqRel);
 
-                // Notify the awaiter that the future has been dropped.
+                // Take the awaiter out.
+                let mut awaiter = None;
                 if state & AWAITER != 0 {
-                    (*raw.header).notify(None);
+                    awaiter = (*raw.header).take(None);
                 }
 
                 // Drop the task reference.
                 Self::drop_ref(ptr);
+
+                // Notify the awaiter that the future has been dropped.
+                if let Some(w) = awaiter {
+                    abort_on_panic(|| w.wake());
+                }
                 return false;
             }
 
@@ -489,9 +495,6 @@ where
                 Self::drop_future(ptr);
                 raw.output.write(out);
 
-                // A place where the output will be stored in case it needs to be dropped.
-                let mut output = None;
-
                 // The task is now completed.
                 loop {
                     // If the `Task` is dropped, we'll need to close it and drop the output.
@@ -512,25 +515,28 @@ where
                             // If the `Task` is dropped or if the task was closed while running,
                             // now it's time to drop the output.
                             if state & TASK == 0 || state & CLOSED != 0 {
-                                // Read the output.
-                                output = Some(raw.output.read());
+                                // Drop the output.
+                                abort_on_panic(|| raw.output.drop_in_place());
                             }
 
-                            // Notify the awaiter that the task has been completed.
+                            // Take the awaiter out.
+                            let mut awaiter = None;
                             if state & AWAITER != 0 {
-                                (*raw.header).notify(None);
+                                awaiter = (*raw.header).take(None);
                             }
 
                             // Drop the task reference.
                             Self::drop_ref(ptr);
+
+                            // Notify the awaiter that the future has been dropped.
+                            if let Some(w) = awaiter {
+                                abort_on_panic(|| w.wake());
+                            }
                             break;
                         }
                         Err(s) => state = s,
                     }
                 }
-
-                // Drop the output if it was taken out of the task.
-                drop(output);
             }
             Poll::Pending => {
                 let mut future_dropped = false;
@@ -564,12 +570,19 @@ where
                             // If the task was woken up while running, we need to schedule it.
                             // Otherwise, we just drop the task reference.
                             if state & CLOSED != 0 {
-                                // Notify the awaiter that the future has been dropped.
+                                // Take the awaiter out.
+                                let mut awaiter = None;
                                 if state & AWAITER != 0 {
-                                    (*raw.header).notify(None);
+                                    awaiter = (*raw.header).take(None);
                                 }
+
                                 // Drop the task reference.
                                 Self::drop_ref(ptr);
+
+                                // Notify the awaiter that the future has been dropped.
+                                if let Some(w) = awaiter {
+                                    abort_on_panic(|| w.wake());
+                                }
                             } else if state & SCHEDULED != 0 {
                                 // The thread that woke the task up didn't reschedule it because
                                 // it was running so now it's our responsibility to do so.
@@ -620,13 +633,19 @@ where
                                 .state
                                 .fetch_and(!RUNNING & !SCHEDULED, Ordering::AcqRel);
 
-                            // Notify the awaiter that the future has been dropped.
+                            // Take the awaiter out.
+                            let mut awaiter = None;
                             if state & AWAITER != 0 {
-                                (*raw.header).notify(None);
+                                awaiter = (*raw.header).take(None);
                             }
 
                             // Drop the task reference.
                             RawTask::<F, T, S>::drop_ref(ptr);
+
+                            // Notify the awaiter that the future has been dropped.
+                            if let Some(w) = awaiter {
+                                abort_on_panic(|| w.wake());
+                            }
                             break;
                         }
 
@@ -641,13 +660,19 @@ where
                                 // Drop the future because the task is now closed.
                                 RawTask::<F, T, S>::drop_future(ptr);
 
-                                // Notify the awaiter that the future has been dropped.
+                                // Take the awaiter out.
+                                let mut awaiter = None;
                                 if state & AWAITER != 0 {
-                                    (*raw.header).notify(None);
+                                    awaiter = (*raw.header).take(None);
                                 }
 
                                 // Drop the task reference.
                                 RawTask::<F, T, S>::drop_ref(ptr);
+
+                                // Notify the awaiter that the future has been dropped.
+                                if let Some(w) = awaiter {
+                                    abort_on_panic(|| w.wake());
+                                }
                                 break;
                             }
                             Err(s) => state = s,

@@ -14,10 +14,10 @@ use crate::state::*;
 ///
 /// A [`Task`] can be awaited to retrieve the output of its future.
 ///
-/// Dropping a [`Task`] cancels it, which means its future won't be polled again.
-/// To drop the [`Task`] handle without canceling it, use [`detach()`][`Task::detach()`] instead.
-/// To cancel a task gracefully and wait until it is fully destroyed, use the
-/// [`cancel()`][Task::cancel()] method.
+/// Dropping a [`Task`] cancels it, which means its future won't be polled again. To drop the
+/// [`Task`] handle without canceling it, use [`detach()`][`Task::detach()`] instead. To cancel a
+/// task gracefully and wait until it is fully destroyed, use the [`cancel()`][Task::cancel()]
+/// method.
 ///
 /// Note that canceling a task actually wakes it and reschedules one last time. Then, the executor
 /// can destroy the task by simply dropping its [`Runnable`][`crate::Runnable`] or by invoking

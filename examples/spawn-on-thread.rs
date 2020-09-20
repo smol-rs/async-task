@@ -28,7 +28,7 @@ where
     };
 
     // Create a task that is scheduled by sending it into the channel.
-    let schedule = move |t| s.upgrade().unwrap().send(t).unwrap();
+    let schedule = move |runnable| s.upgrade().unwrap().send(runnable).unwrap();
     let (runnable, task) = async_task::spawn(future, schedule);
 
     // Schedule the task by sending it into the channel.

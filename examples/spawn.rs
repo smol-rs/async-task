@@ -21,7 +21,7 @@ where
         // Start the executor thread.
         thread::spawn(|| {
             for runnable in receiver {
-                // Ignore panics for simplicity.
+                // Ignore panics inside futures.
                 let _ignore_panic = catch_unwind(|| runnable.run());
             }
         });
@@ -30,7 +30,7 @@ where
     });
 
     // Create a task that is scheduled by pushing it into the queue.
-    let schedule = |t| QUEUE.send(t).unwrap();
+    let schedule = |runnable| QUEUE.send(runnable).unwrap();
     let (runnable, task) = async_task::spawn(future, schedule);
 
     // Schedule the task by pushing it into the queue.

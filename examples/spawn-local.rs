@@ -18,7 +18,7 @@ where
     T: 'static,
 {
     // Create a task that is scheduled by pushing itself into the queue.
-    let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
+    let schedule = |runnable| QUEUE.with(|(s, _)| s.send(runnable).unwrap());
     let (runnable, task) = async_task::spawn_local(future, schedule);
 
     // Schedule the task by pushing it into the queue.
