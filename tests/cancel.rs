@@ -129,7 +129,10 @@ fn cancel_and_run() {
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
             assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
-            assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
+
+            thread::sleep(ms(200));
+
+            assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
         })
         .add(|| {
             assert!(future::block_on(task.cancel()).is_none());
@@ -140,6 +143,9 @@ fn cancel_and_run() {
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
             assert_eq!(DROP_T.load(Ordering::SeqCst), 0);
+
+            thread::sleep(ms(200));
+
             assert_eq!(DROP_S.load(Ordering::SeqCst), 1);
         })
         .run();
