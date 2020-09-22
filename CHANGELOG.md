@@ -1,3 +1,7 @@
+# Version 4.0.2
+
+- Nits in the docs.
+
 # Version 4.0.1
 
 - Nits in the docs.
