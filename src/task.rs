@@ -20,7 +20,7 @@ use crate::state::*;
 /// method.
 ///
 /// Note that canceling a task actually wakes it and reschedules one last time. Then, the executor
-/// can destroy the task by simply dropping its [`Runnable`][`crate::Runnable`] or by invoking
+/// can destroy the task by simply dropping its [`Runnable`][`super::Runnable`] or by invoking
 /// [`run()`][`super::Runnable::run()`].
 ///
 /// # Examples
