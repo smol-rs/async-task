@@ -276,9 +276,10 @@ impl Runnable {
     /// Runs the task by polling its future.
     ///
     /// Returns `true` if the task was woken while running, in which case the [`Runnable`] gets
-    /// rescheduled at the end of this method invocation.
-    ///
-    /// Otherwise, returns `true` and the [`Runnable`] vanishes until the task is woken.
+    /// rescheduled at the end of this method invocation. Otherwise, returns `false` and the
+    /// [`Runnable`] vanishes until the task is woken.
+    /// The return value is just a hint: `true` usually indicates that the task has yielded, i.e.
+    /// it woke itself and then gave the control back to the executor.
     ///
     /// If the [`Task`] handle was dropped or if [`cancel()`][`Task::cancel()`] was called, then
     /// this method simply destroys the task.
