@@ -3,6 +3,8 @@ use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::Waker;
 
+#[cfg(feature = "intrusive")]
+use crate::intrusive::AtomicLink;
 use crate::raw::TaskVTable;
 use crate::state::*;
 use crate::utils::abort_on_panic;
@@ -11,6 +13,10 @@ use crate::utils::abort_on_panic;
 ///
 /// This header is stored in memory at the beginning of the heap-allocated task.
 pub(crate) struct Header {
+    /// The link for an intrusive linked list.
+    #[cfg(feature = "intrusive")]
+    pub(crate) link: AtomicLink,
+
     /// Current state of the task.
     ///
     /// Contains flags representing the current state and the reference count.

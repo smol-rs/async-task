@@ -1,9 +1,13 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "intrusive")]
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use async_task::Runnable;
+#[cfg(feature = "intrusive")]
+use async_task::RunnableList;
 use smol::future;
 
 // Creates a future with event counters.
@@ -261,6 +265,28 @@ fn schedule_counter() {
     r.recv().unwrap().schedule();
     assert_eq!(COUNT.load(Ordering::SeqCst), 3);
     r.recv().unwrap();
+}
+
+#[cfg(feature = "intrusive")]
+#[test]
+fn schedule_intrusive() {
+    let q = Arc::new(Mutex::new(RunnableList::default()));
+    let q2 = Arc::clone(&q);
+    let schedule = move |runnable| q2.lock().unwrap().push_back(runnable);
+    let (runnable, _task) = async_task::spawn(future::poll_fn(|_| Poll::<()>::Pending), schedule);
+
+    assert!(q.lock().unwrap().is_empty());
+    runnable.schedule();
+
+    let runnable = q.lock().unwrap().pop_front().unwrap();
+    assert!(q.lock().unwrap().is_empty());
+    runnable.schedule();
+
+    let runnable = q.lock().unwrap().pop_front().unwrap();
+    assert!(q.lock().unwrap().is_empty());
+    runnable.schedule();
+
+    q.lock().unwrap().pop_front().unwrap();
 }
 
 #[test]

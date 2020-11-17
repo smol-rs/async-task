@@ -8,6 +8,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::header::Header;
+#[cfg(feature = "intrusive")]
+use crate::intrusive::AtomicLink;
 use crate::state::*;
 use crate::utils::{abort, abort_on_panic, extend};
 use crate::Runnable;
@@ -110,6 +112,8 @@ where
 
             // Write the header as the first field of the task.
             (raw.header as *mut Header).write(Header {
+                #[cfg(feature = "intrusive")]
+                link: AtomicLink::new(),
                 state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
                 awaiter: UnsafeCell::new(None),
                 vtable: &TaskVTable {

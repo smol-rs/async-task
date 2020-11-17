@@ -15,6 +15,10 @@ readme = "README.md"
 [features]
 default = ["std"]
 std = []
+intrusive = ["intrusive-collections"]
+
+[dependencies]
+intrusive-collections = { version = "0.9", default-features = false, optional = true }
 
 [dev-dependencies]
 atomic-waker = "1.0.0"
