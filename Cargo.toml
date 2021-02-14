@@ -10,7 +10,6 @@ documentation = "https://docs.rs/async-task"
 description = "Task abstraction for building executors"
 keywords = ["futures", "task", "executor", "spawn"]
 categories = ["asynchronous", "concurrency", "no-std"]
-readme = "README.md"
 
 [features]
 default = ["std"]
