@@ -3,6 +3,7 @@ name = "async-task"
 version = "4.0.3"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
+rust-version = "1.39"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/async-task"
 homepage = "https://github.com/smol-rs/async-task"
@@ -10,6 +11,7 @@ documentation = "https://docs.rs/async-task"
 description = "Task abstraction for building executors"
 keywords = ["futures", "task", "executor", "spawn"]
 categories = ["asynchronous", "concurrency", "no-std"]
+exclude = ["/.*"]
 
 [features]
 default = ["std"]
