@@ -28,13 +28,7 @@ jobs:
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       - name: Install valgrind
-        run: |
-          sudo apt-get update -qq
-          # libc6-dbg is needed to run Valgrind
-          sudo apt-get install -y libc6-dbg
-          # Use snap to install the latest Valgrind
-          # https://snapcraft.io/install/valgrind/ubuntu
-          sudo snap install valgrind --classic
+        uses: taiki-e/install-action@valgrind
       - run: cargo build --all --all-features --all-targets
         if: startsWith(matrix.rust, 'nightly')
       - run: cargo hack build --feature-powerset --no-dev-deps
