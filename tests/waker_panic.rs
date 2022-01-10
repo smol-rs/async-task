@@ -238,10 +238,15 @@ fn wake_and_cancel_during_run() {
         .run();
 }
 
-#[test]
+#[flaky_test::flaky_test]
 fn cancel_and_wake_during_run() {
     future!(f, get_waker, POLL, DROP_F);
     schedule!(s, chan, SCHEDULE, DROP_S);
+    POLL.store(0, Ordering::SeqCst);
+    DROP_F.store(0, Ordering::SeqCst);
+    SCHEDULE.store(0, Ordering::SeqCst);
+    DROP_S.store(0, Ordering::SeqCst);
+
     let (runnable, task) = async_task::spawn(f, s);
 
     runnable.run();
