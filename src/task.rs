@@ -395,6 +395,23 @@ impl<T> Task<T> {
         let header = ptr as *const Header;
         unsafe { &*header }
     }
+
+    /// Get the current state of the task.
+    ///
+    /// Note that in a multithreaded environment, this state can change immediately after calling this function.
+    pub fn state(&self) -> TaskState {
+        let ptr = self.ptr.as_ptr();
+        let header = ptr as *const Header;
+
+        unsafe {
+            let state = (*header).state.load(Ordering::Acquire);
+            if state & (CLOSED | COMPLETED) != 0 {
+                TaskState::Completed
+            } else {
+                TaskState::Running
+            }
+        }
+    }
 }
 
 impl<T> Drop for Task<T> {
@@ -514,4 +531,15 @@ impl<T> fmt::Debug for FallibleTask<T> {
             .field("header", self.task.header())
             .finish()
     }
+}
+
+/// The state of a task.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TaskState {
+    /// The task is still running.
+    Running,
+
+    /// The task has completed.
+    Completed,
 }
