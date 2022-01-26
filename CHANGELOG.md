@@ -1,3 +1,7 @@
+# Version 4.1.0
+
+- Add `FallibleTask`. (#21)
+
 # Version 4.0.3
 
 - Document the return value of `Runnable::run()` better.
