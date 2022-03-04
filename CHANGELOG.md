@@ -1,3 +1,7 @@
+# Version 4.2.0
+
+- Add `Task::is_finished`. (#19)
+
 # Version 4.1.0
 
 - Add `FallibleTask`. (#21)
