@@ -396,20 +396,16 @@ impl<T> Task<T> {
         unsafe { &*header }
     }
 
-    /// Get the current state of the task.
+    /// Returns `true` if the current task is finished.
     ///
-    /// Note that in a multithreaded environment, this state can change immediately after calling this function.
-    pub fn state(&self) -> TaskState {
+    /// Note that in a multithreaded environment, this task can change finish immediately after calling this function.
+    pub fn is_finished(&self) -> bool {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header;
 
         unsafe {
             let state = (*header).state.load(Ordering::Acquire);
-            if state & (CLOSED | COMPLETED) != 0 {
-                TaskState::Completed
-            } else {
-                TaskState::Running
-            }
+            state & (CLOSED | COMPLETED) != 0
         }
     }
 }
@@ -531,15 +527,4 @@ impl<T> fmt::Debug for FallibleTask<T> {
             .field("header", self.task.header())
             .finish()
     }
-}
-
-/// The state of a task.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TaskState {
-    /// The task is still running.
-    Running,
-
-    /// The task has completed.
-    Completed,
 }
