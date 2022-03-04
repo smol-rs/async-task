@@ -395,6 +395,19 @@ impl<T> Task<T> {
         let header = ptr as *const Header;
         unsafe { &*header }
     }
+
+    /// Returns `true` if the current task is finished.
+    ///
+    /// Note that in a multithreaded environment, this task can change finish immediately after calling this function.
+    pub fn is_finished(&self) -> bool {
+        let ptr = self.ptr.as_ptr();
+        let header = ptr as *const Header;
+
+        unsafe {
+            let state = (*header).state.load(Ordering::Acquire);
+            state & (CLOSED | COMPLETED) != 0
+        }
+    }
 }
 
 impl<T> Drop for Task<T> {
