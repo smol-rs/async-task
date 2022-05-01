@@ -99,6 +99,7 @@ impl<T> Task<T> {
     /// # Examples
     ///
     /// ```
+    /// # if cfg!(miri) { return; } // Miri does not support epoll
     /// use smol::{future, Executor, Timer};
     /// use std::thread;
     /// use std::time::Duration;
@@ -485,6 +486,7 @@ impl<T> FallibleTask<T> {
     /// # Examples
     ///
     /// ```
+    /// # if cfg!(miri) { return; } // Miri does not support epoll
     /// use smol::{future, Executor, Timer};
     /// use std::thread;
     /// use std::time::Duration;

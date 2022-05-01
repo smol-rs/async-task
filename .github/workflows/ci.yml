@@ -68,6 +68,18 @@ jobs:
         run: rustup update stable
       - run: cargo fmt --all -- --check
 
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        run: rustup toolchain install nightly --component miri && rustup default nightly
+      - run: cargo miri test
+        env:
+          # -Zmiri-ignore-leaks is needed because we use detached threads in doctests
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-ignore-leaks
+          RUSTFLAGS: ${{ env.RUSTFLAGS }} -Z randomize-layout
+
   security_audit:
     runs-on: ubuntu-latest
     steps:
