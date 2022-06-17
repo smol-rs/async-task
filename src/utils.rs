@@ -41,14 +41,24 @@ pub(crate) fn abort_on_panic<T>(f: impl FnOnce() -> T) -> T {
 /// This function was adapted from the currently unstable `Layout::extend()`:
 /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.extend
 #[inline]
-pub(crate) fn extend(a: Layout, b: Layout) -> (Layout, usize) {
-    let new_align = a.align().max(b.align());
+pub(crate) const fn extend(a: Layout, b: Layout) -> (Layout, usize) {
+    let new_align = const_max(a.align(), b.align());
     let pad = padding_needed_for(a, b.align());
 
-    let offset = a.size().checked_add(pad).unwrap();
-    let new_size = offset.checked_add(b.size()).unwrap();
+    // Cannot use unwrap here due to it not being const.
+    let offset = match a.size().checked_add(pad) {
+        Some(offset) => offset,
+        None => panic!(),
+    };
+    let new_size = match offset.checked_add(b.size()) {
+        Some(new_size) => new_size,
+        None => panic!(),
+    };
 
-    let layout = Layout::from_size_align(new_size, new_align).unwrap();
+    let layout = match Layout::from_size_align(new_size, new_align) {
+        Ok(layout) => layout,
+        Err(_) => panic!(),
+    };
     (layout, offset)
 }
 
@@ -57,8 +67,18 @@ pub(crate) fn extend(a: Layout, b: Layout) -> (Layout, usize) {
 /// This function was adapted from the currently unstable `Layout::padding_needed_for()`:
 /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.padding_needed_for
 #[inline]
-pub(crate) fn padding_needed_for(layout: Layout, align: usize) -> usize {
+pub(crate) const fn padding_needed_for(layout: Layout, align: usize) -> usize {
     let len = layout.size();
     let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
     len_rounded_up.wrapping_sub(len)
+}
+
+/// A const-friendly max function, since trait functions cannot be const.
+#[inline]
+pub(crate) const fn const_max(a: usize, b: usize) -> usize {
+    if a > b {
+        a
+    } else {
+        b
+    }
 }

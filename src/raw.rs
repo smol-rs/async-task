@@ -9,7 +9,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::header::Header;
 use crate::state::*;
-use crate::utils::{abort, abort_on_panic, extend};
+use crate::utils::{abort, abort_on_panic, const_max, extend};
 use crate::Runnable;
 
 /// The vtable for a task.
@@ -92,16 +92,40 @@ where
         Self::drop_waker,
     );
 
+    const TASK_LAYOUT: TaskLayout = {
+        // Compute the layouts for `Header`, `S`, `F`, and `T`.
+        let layout_header = Layout::new::<Header>();
+        let layout_s = Layout::new::<S>();
+        let layout_f = Layout::new::<F>();
+        let layout_r = Layout::new::<T>();
+
+        // Compute the layout for `union { F, T }`.
+        let size_union = const_max(layout_f.size(), layout_r.size());
+        let align_union = const_max(layout_f.align(), layout_r.align());
+        let layout_union = unsafe { Layout::from_size_align_unchecked(size_union, align_union) };
+
+        // Compute the layout for `Header` followed `S` and `union { F, T }`.
+        let layout = layout_header;
+        let (layout, offset_s) = extend(layout, layout_s);
+        let (layout, offset_union) = extend(layout, layout_union);
+        let offset_f = offset_union;
+        let offset_r = offset_union;
+
+        TaskLayout {
+            layout,
+            offset_s,
+            offset_f,
+            offset_r,
+        }
+    };
+
     /// Allocates a task with the given `future` and `schedule` function.
     ///
     /// It is assumed that initially only the `Runnable` and the `Task` exist.
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
-        // Compute the layout of the task for allocation. Abort if the computation fails.
-        let task_layout = abort_on_panic(|| Self::task_layout());
-
         unsafe {
             // Allocate enough space for the entire task.
-            let ptr = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
+            let ptr = match NonNull::new(alloc::alloc::alloc(Self::TASK_LAYOUT.layout) as *mut ()) {
                 None => abort(),
                 Some(p) => p,
             };
@@ -135,46 +159,16 @@ where
 
     /// Creates a `RawTask` from a raw task pointer.
     #[inline]
-    pub(crate) fn from_ptr(ptr: *const ()) -> Self {
-        let task_layout = Self::task_layout();
+    pub(crate) const fn from_ptr(ptr: *const ()) -> Self {
         let p = ptr as *const u8;
 
         unsafe {
             Self {
                 header: p as *const Header,
-                schedule: p.add(task_layout.offset_s) as *const S,
-                future: p.add(task_layout.offset_f) as *mut F,
-                output: p.add(task_layout.offset_r) as *mut T,
+                schedule: p.add(Self::TASK_LAYOUT.offset_s) as *const S,
+                future: p.add(Self::TASK_LAYOUT.offset_f) as *mut F,
+                output: p.add(Self::TASK_LAYOUT.offset_r) as *mut T,
             }
-        }
-    }
-
-    /// Returns the memory layout for a task.
-    #[inline]
-    fn task_layout() -> TaskLayout {
-        // Compute the layouts for `Header`, `S`, `F`, and `T`.
-        let layout_header = Layout::new::<Header>();
-        let layout_s = Layout::new::<S>();
-        let layout_f = Layout::new::<F>();
-        let layout_r = Layout::new::<T>();
-
-        // Compute the layout for `union { F, T }`.
-        let size_union = layout_f.size().max(layout_r.size());
-        let align_union = layout_f.align().max(layout_r.align());
-        let layout_union = unsafe { Layout::from_size_align_unchecked(size_union, align_union) };
-
-        // Compute the layout for `Header` followed `S` and `union { F, T }`.
-        let layout = layout_header;
-        let (layout, offset_s) = extend(layout, layout_s);
-        let (layout, offset_union) = extend(layout, layout_union);
-        let offset_f = offset_union;
-        let offset_r = offset_union;
-
-        TaskLayout {
-            layout,
-            offset_s,
-            offset_f,
-            offset_r,
         }
     }
 
@@ -416,7 +410,6 @@ where
     #[inline]
     unsafe fn destroy(ptr: *const ()) {
         let raw = Self::from_ptr(ptr);
-        let task_layout = Self::task_layout();
 
         // We need a safeguard against panics because destructors can panic.
         abort_on_panic(|| {
@@ -425,7 +418,7 @@ where
         });
 
         // Finally, deallocate the memory reserved by the task.
-        alloc::alloc::dealloc(ptr as *mut u8, task_layout.layout);
+        alloc::alloc::dealloc(ptr as *mut u8, Self::TASK_LAYOUT.layout);
     }
 
     /// Runs a task.
