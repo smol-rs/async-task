@@ -77,8 +77,9 @@ jobs:
       - run: cargo miri test
         env:
           # -Zmiri-ignore-leaks is needed because we use detached threads in doctests
+          # disable preemption due to https://github.com/rust-lang/rust/issues/55005
           # TODO: remove -Zmiri-disable-weak-memory-emulation once https://github.com/rust-lang/miri/issues/2223 fixed.
-          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation -Zmiri-ignore-leaks
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation -Zmiri-ignore-leaks -Zmiri-preemption-rate=0
           RUSTFLAGS: ${{ env.RUSTFLAGS }} -Z randomize-layout
 
   security_audit:
