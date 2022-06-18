@@ -43,18 +43,18 @@ pub(crate) struct TaskVTable {
 /// 1. How to allocate and deallocate the task.
 /// 2. How to access the fields inside the task.
 #[derive(Clone, Copy)]
-struct TaskLayout {
+pub(crate) struct TaskLayout {
     /// Memory layout of the whole task.
-    layout: Layout,
+    pub(crate) layout: Layout,
 
     /// Offset into the task at which the schedule function is stored.
-    offset_s: usize,
+    pub(crate) offset_s: usize,
 
     /// Offset into the task at which the future is stored.
-    offset_f: usize,
+    pub(crate) offset_f: usize,
 
     /// Offset into the task at which the output is stored.
-    offset_r: usize,
+    pub(crate) offset_r: usize,
 }
 
 /// Raw pointers to the fields inside a task.
