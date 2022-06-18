@@ -41,25 +41,25 @@ pub(crate) fn abort_on_panic<T>(f: impl FnOnce() -> T) -> T {
 /// This function was adapted from the currently unstable `Layout::extend()`:
 /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.extend
 #[inline]
-pub(crate) const fn extend(a: Layout, b: Layout) -> (Layout, usize) {
+pub(crate) const fn extend(a: Layout, b: Layout) -> Option<(Layout, usize)> {
     let new_align = const_max(a.align(), b.align());
     let pad = padding_needed_for(a, b.align());
 
     // Cannot use unwrap here due to it not being const.
     let offset = match a.size().checked_add(pad) {
         Some(offset) => offset,
-        None => panic!(),
+        None => return None,
     };
     let new_size = match offset.checked_add(b.size()) {
         Some(new_size) => new_size,
-        None => panic!(),
+        None => return None,
     };
 
     let layout = match Layout::from_size_align(new_size, new_align) {
         Ok(layout) => layout,
-        Err(_) => panic!(),
+        Err(_) => return None,
     };
-    (layout, offset)
+    Some((layout, offset))
 }
 
 /// Returns the padding after `layout` that aligns the following address to `align`.

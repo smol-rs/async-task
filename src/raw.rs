@@ -92,7 +92,12 @@ where
         Self::drop_waker,
     );
 
-    const TASK_LAYOUT: TaskLayout = {
+    // Unwrap/panic in const contexts requires Rust 1.57. Until
+    // the MSRV is bumped past that, this should remain a Option
+    // that is unwrapped at runtime.
+    const TASK_LAYOUT: Option<TaskLayout> = Self::build_layout();
+
+    const fn build_layout() -> Option<TaskLayout> {
         // Compute the layouts for `Header`, `S`, `F`, and `T`.
         let layout_header = Layout::new::<Header>();
         let layout_s = Layout::new::<S>();
@@ -106,18 +111,24 @@ where
 
         // Compute the layout for `Header` followed `S` and `union { F, T }`.
         let layout = layout_header;
-        let (layout, offset_s) = extend(layout, layout_s);
-        let (layout, offset_union) = extend(layout, layout_union);
+        let (layout, offset_s) = match extend(layout, layout_s) {
+            Some((a, b)) => (a, b),
+            None => return None,
+        };
+        let (layout, offset_union) = match extend(layout, layout_union) {
+            Some((a, b)) => (a, b),
+            None => return None,
+        };
         let offset_f = offset_union;
         let offset_r = offset_union;
 
-        TaskLayout {
+        Some(TaskLayout {
             layout,
             offset_s,
             offset_f,
             offset_r,
-        }
-    };
+        })
+    }
 
     /// Allocates a task with the given `future` and `schedule` function.
     ///
@@ -125,7 +136,9 @@ where
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
         unsafe {
             // Allocate enough space for the entire task.
-            let ptr = match NonNull::new(alloc::alloc::alloc(Self::TASK_LAYOUT.layout) as *mut ()) {
+            let ptr = match NonNull::new(
+                alloc::alloc::alloc(Self::TASK_LAYOUT.unwrap().layout) as *mut ()
+            ) {
                 None => abort(),
                 Some(p) => p,
             };
@@ -159,15 +172,16 @@ where
 
     /// Creates a `RawTask` from a raw task pointer.
     #[inline]
-    pub(crate) const fn from_ptr(ptr: *const ()) -> Self {
+    pub(crate) fn from_ptr(ptr: *const ()) -> Self {
+        let layout = Self::TASK_LAYOUT.unwrap();
         let p = ptr as *const u8;
 
         unsafe {
             Self {
                 header: p as *const Header,
-                schedule: p.add(Self::TASK_LAYOUT.offset_s) as *const S,
-                future: p.add(Self::TASK_LAYOUT.offset_f) as *mut F,
-                output: p.add(Self::TASK_LAYOUT.offset_r) as *mut T,
+                schedule: p.add(layout.offset_s) as *const S,
+                future: p.add(layout.offset_f) as *mut F,
+                output: p.add(layout.offset_r) as *mut T,
             }
         }
     }
@@ -418,7 +432,7 @@ where
         });
 
         // Finally, deallocate the memory reserved by the task.
-        alloc::alloc::dealloc(ptr as *mut u8, Self::TASK_LAYOUT.layout);
+        alloc::alloc::dealloc(ptr as *mut u8, Self::TASK_LAYOUT.unwrap().layout);
     }
 
     /// Runs a task.
