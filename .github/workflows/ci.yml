@@ -76,9 +76,10 @@ jobs:
         run: rustup toolchain install nightly --component miri && rustup default nightly
       - run: cargo miri test
         env:
-          # -Zmiri-ignore-leaks is needed because we use detached threads in doctests
+          # -Zmiri-ignore-leaks is needed because we use detached threads in doctests: https://github.com/rust-lang/miri/issues/1371
           # disable preemption due to https://github.com/rust-lang/rust/issues/55005
-          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-ignore-leaks -Zmiri-preemption-rate=0
+          # TODO: enable -Zmiri-strict-provenance once https://github.com/matklad/once_cell/pull/185 merged and released.
+          MIRIFLAGS: -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-ignore-leaks -Zmiri-preemption-rate=0
           RUSTFLAGS: ${{ env.RUSTFLAGS }} -Z randomize-layout
 
   security_audit:
