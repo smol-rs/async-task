@@ -87,15 +87,15 @@ impl<F, T, S> RawTask<F, T, S> {
     #[inline]
     const fn eval_task_layout() -> Option<TaskLayout> {
         // Compute the layouts for `Header`, `S`, `F`, and `T`.
-        let layout_header = Layout::of::<Header>();
-        let layout_s = Layout::of::<S>();
-        let layout_f = Layout::of::<F>();
-        let layout_r = Layout::of::<T>();
+        let layout_header = Layout::new::<Header>();
+        let layout_s = Layout::new::<S>();
+        let layout_f = Layout::new::<F>();
+        let layout_r = Layout::new::<T>();
 
         // Compute the layout for `union { F, T }`.
         let size_union = max(layout_f.size(), layout_r.size());
         let align_union = max(layout_f.align(), layout_r.align());
-        let layout_union = Layout::new(size_union, align_union);
+        let layout_union = Layout::from_size_align(size_union, align_union);
 
         // Compute the layout for `Header` followed `S` and `union { F, T }`.
         let layout = layout_header;
@@ -130,7 +130,7 @@ where
     /// It is assumed that initially only the `Runnable` and the `Task` exist.
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
         // Compute the layout of the task for allocation. Abort if the computation fails.
-        // 
+        //
         // n.b. notgull: task_layout now automatically aborts instead of panicking
         let task_layout = Self::task_layout();
 

@@ -47,14 +47,14 @@ pub(crate) struct Layout {
 impl Layout {
     /// Creates a new `Layout` with the given size and alignment.
     #[inline]
-    pub(crate) const fn new(size: usize, align: usize) -> Self {
+    pub(crate) const fn from_size_align(size: usize, align: usize) -> Self {
         Self { size, align }
     }
 
     /// Creates a new `Layout` for the given sized type.
     #[inline]
-    pub(crate) const fn of<T>() -> Self {
-        Self::new(mem::size_of::<T>(), mem::align_of::<T>())
+    pub(crate) const fn new<T>() -> Self {
+        Self::from_size_align(mem::size_of::<T>(), mem::align_of::<T>())
     }
 
     /// Convert this into the standard library's layout type.
@@ -88,7 +88,7 @@ impl Layout {
     #[inline]
     pub(crate) const fn extend(self, other: Layout) -> Option<(Layout, usize)> {
         let new_align = max(self.align(), other.align());
-        let pad = padding_needed_for(self, other.align());
+        let pad = self.padding_needed_for(other.align());
 
         let offset = leap!(self.size().checked_add(pad));
         let new_size = leap!(offset.checked_add(other.size()));
@@ -104,20 +104,20 @@ impl Layout {
             return None;
         }
 
-        let layout = Layout::new(new_size, new_align);
+        let layout = Layout::from_size_align(new_size, new_align);
         Some((layout, offset))
     }
-}
 
-/// Returns the padding after `layout` that aligns the following address to `align`.
-///
-/// This function was adapted from the currently unstable `Layout::padding_needed_for()`:
-/// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.padding_needed_for
-#[inline]
-pub(crate) const fn padding_needed_for(layout: Layout, align: usize) -> usize {
-    let len = layout.size();
-    let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
-    len_rounded_up.wrapping_sub(len)
+    /// Returns the padding after `layout` that aligns the following address to `align`.
+    ///
+    /// This function was adapted from the currently unstable `Layout::padding_needed_for()`:
+    /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.padding_needed_for
+    #[inline]
+    pub(crate) const fn padding_needed_for(self, align: usize) -> usize {
+        let len = self.size();
+        let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
+        len_rounded_up.wrapping_sub(len)
+    }
 }
 
 #[inline]
