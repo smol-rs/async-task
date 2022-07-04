@@ -1,4 +1,4 @@
-use alloc::alloc::Layout;
+use alloc::alloc::Layout as StdLayout;
 use core::cell::UnsafeCell;
 use core::future::Future;
 use core::mem::{self, ManuallyDrop};
@@ -9,7 +9,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::header::Header;
 use crate::state::*;
-use crate::utils::{abort, abort_on_panic, extend};
+use crate::utils::{abort, abort_on_panic, max, Layout};
 use crate::Runnable;
 
 /// The vtable for a task.
@@ -45,7 +45,7 @@ pub(crate) struct TaskVTable {
 #[derive(Clone, Copy)]
 pub(crate) struct TaskLayout {
     /// Memory layout of the whole task.
-    pub(crate) layout: Layout,
+    pub(crate) layout: StdLayout,
 
     /// Offset into the task at which the schedule function is stored.
     pub(crate) offset_s: usize,
@@ -80,6 +80,39 @@ impl<F, T, S> Clone for RawTask<F, T, S> {
     }
 }
 
+impl<F, T, S> RawTask<F, T, S> {
+    const TASK_LAYOUT: Option<TaskLayout> = Self::eval_task_layout();
+
+    /// Computes the memory layout for a task.
+    #[inline]
+    const fn eval_task_layout() -> Option<TaskLayout> {
+        // Compute the layouts for `Header`, `S`, `F`, and `T`.
+        let layout_header = Layout::of::<Header>();
+        let layout_s = Layout::of::<S>();
+        let layout_f = Layout::of::<F>();
+        let layout_r = Layout::of::<T>();
+
+        // Compute the layout for `union { F, T }`.
+        let size_union = max(layout_f.size(), layout_r.size());
+        let align_union = max(layout_f.align(), layout_r.align());
+        let layout_union = Layout::new(size_union, align_union);
+
+        // Compute the layout for `Header` followed `S` and `union { F, T }`.
+        let layout = layout_header;
+        let (layout, offset_s) = leap!(layout.extend(layout_s));
+        let (layout, offset_union) = leap!(layout.extend(layout_union));
+        let offset_f = offset_union;
+        let offset_r = offset_union;
+
+        Some(TaskLayout {
+            layout: unsafe { layout.into_std() },
+            offset_s,
+            offset_f,
+            offset_r,
+        })
+    }
+}
+
 impl<F, T, S> RawTask<F, T, S>
 where
     F: Future<Output = T>,
@@ -97,7 +130,9 @@ where
     /// It is assumed that initially only the `Runnable` and the `Task` exist.
     pub(crate) fn allocate(future: F, schedule: S) -> NonNull<()> {
         // Compute the layout of the task for allocation. Abort if the computation fails.
-        let task_layout = abort_on_panic(|| Self::task_layout());
+        // 
+        // n.b. notgull: task_layout now automatically aborts instead of panicking
+        let task_layout = Self::task_layout();
 
         unsafe {
             // Allocate enough space for the entire task.
@@ -149,32 +184,12 @@ where
         }
     }
 
-    /// Returns the memory layout for a task.
+    /// Returns the layout of the task.
     #[inline]
     fn task_layout() -> TaskLayout {
-        // Compute the layouts for `Header`, `S`, `F`, and `T`.
-        let layout_header = Layout::new::<Header>();
-        let layout_s = Layout::new::<S>();
-        let layout_f = Layout::new::<F>();
-        let layout_r = Layout::new::<T>();
-
-        // Compute the layout for `union { F, T }`.
-        let size_union = layout_f.size().max(layout_r.size());
-        let align_union = layout_f.align().max(layout_r.align());
-        let layout_union = unsafe { Layout::from_size_align_unchecked(size_union, align_union) };
-
-        // Compute the layout for `Header` followed `S` and `union { F, T }`.
-        let layout = layout_header;
-        let (layout, offset_s) = extend(layout, layout_s);
-        let (layout, offset_union) = extend(layout, layout_union);
-        let offset_f = offset_union;
-        let offset_r = offset_union;
-
-        TaskLayout {
-            layout,
-            offset_s,
-            offset_f,
-            offset_r,
+        match Self::TASK_LAYOUT {
+            Some(tl) => tl,
+            None => abort(),
         }
     }
 
