@@ -94,12 +94,11 @@ impl Layout {
         let new_size = leap!(offset.checked_add(other.size()));
 
         // return None if any of the following are true:
-        // - align is 0
+        // - align is 0 (implied false by is_power_of_two())
         // - align is not a power of 2
-        // - size * align overflows
-        if new_align == 0
-            || !new_align.is_power_of_two()
-            || matches!(new_size.checked_mul(new_align), None)
+        // - size rounded up to align overflows
+        if !new_align.is_power_of_two()
+            || new_size > core::usize::MAX - (new_align - 1) 
         {
             return None;
         }
