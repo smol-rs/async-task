@@ -34,6 +34,12 @@ pub(crate) struct TaskVTable {
 
     /// Creates a new waker associated with the task.
     pub(crate) clone_waker: unsafe fn(ptr: *const ()) -> RawWaker,
+
+    /// The memory layout of the task. This information enables
+    /// debuggers to decode raw task memory blobs. Do not remove
+    /// the field, even if it appears to be unused.
+    #[allow(unused)]
+    pub(crate) layout_info: &'static Option<TaskLayout>,
 }
 
 /// Memory layout of a task.
@@ -155,6 +161,7 @@ where
                     destroy: Self::destroy,
                     run: Self::run,
                     clone_waker: Self::clone_waker,
+                    layout_info: &Self::TASK_LAYOUT,
                 },
             });
 
