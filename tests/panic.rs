@@ -131,7 +131,7 @@ fn try_join_and_run_and_join() {
     schedule!(s, SCHEDULE, DROP_S);
     let (runnable, mut task) = async_task::spawn(f, s);
 
-    future::block_on(future::or(&mut task, future::ready(Default::default())));
+    future::block_on(future::or(&mut task, future::ready(())));
     assert_eq!(POLL.load(Ordering::SeqCst), 0);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
@@ -197,7 +197,7 @@ fn try_join_during_run() {
         .add(|| {
             thread::sleep(ms(200));
 
-            future::block_on(future::or(&mut task, future::ready(Default::default())));
+            future::block_on(future::or(&mut task, future::ready(())));
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
