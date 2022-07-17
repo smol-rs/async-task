@@ -175,6 +175,7 @@ fn wake_by_ref() {
     assert_eq!(chan.len(), 0);
 }
 
+#[allow(clippy::redundant_clone)] // This is intentional
 #[test]
 fn clone() {
     future!(f, get_waker, POLL, DROP_F);
