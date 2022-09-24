@@ -97,7 +97,7 @@ impl Layout {
         // - align is 0 (implied false by is_power_of_two())
         // - align is not a power of 2
         // - size rounded up to align overflows
-        if !new_align.is_power_of_two() || new_size > core::isize::MAX as usize - (new_align - 1) {
+        if !new_align.is_power_of_two() || new_size > isize::MAX as usize - (new_align - 1) {
             return None;
         }
 

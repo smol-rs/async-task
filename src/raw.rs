@@ -310,7 +310,7 @@ where
                         // If the task is not running, now is the time to schedule.
                         if state & RUNNING == 0 {
                             // If the reference count overflowed, abort.
-                            if state > isize::max_value() as usize {
+                            if state > isize::MAX as usize {
                                 abort();
                             }
 
@@ -340,7 +340,7 @@ where
         let state = (*raw.header).state.fetch_add(REFERENCE, Ordering::Relaxed);
 
         // If the reference count overflowed, abort.
-        if state > isize::max_value() as usize {
+        if state > isize::MAX as usize {
             abort();
         }
 
