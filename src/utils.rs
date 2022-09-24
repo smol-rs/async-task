@@ -83,7 +83,7 @@ impl Layout {
 
     /// Returns the layout for `a` followed by `b` and the offset of `b`.
     ///
-    /// This function was adapted from the currently unstable `Layout::extend()`:
+    /// This function was adapted from the `Layout::extend()`:
     /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.extend
     #[inline]
     pub(crate) const fn extend(self, other: Layout) -> Option<(Layout, usize)> {
@@ -97,7 +97,7 @@ impl Layout {
         // - align is 0 (implied false by is_power_of_two())
         // - align is not a power of 2
         // - size rounded up to align overflows
-        if !new_align.is_power_of_two() || new_size > core::usize::MAX - (new_align - 1) {
+        if !new_align.is_power_of_two() || new_size > core::isize::MAX as usize - (new_align - 1) {
             return None;
         }
 
@@ -107,7 +107,7 @@ impl Layout {
 
     /// Returns the padding after `layout` that aligns the following address to `align`.
     ///
-    /// This function was adapted from the currently unstable `Layout::padding_needed_for()`:
+    /// This function was adapted from the `Layout::padding_needed_for()`:
     /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.padding_needed_for
     #[inline]
     pub(crate) const fn padding_needed_for(self, align: usize) -> usize {
