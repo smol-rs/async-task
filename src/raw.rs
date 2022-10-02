@@ -446,6 +446,9 @@ where
 
         // We need a safeguard against panics because destructors can panic.
         abort_on_panic(|| {
+            // Drop the header along with the metadata.
+            (raw.header as *mut Header<M>).drop_in_place();
+
             // Drop the schedule function.
             (raw.schedule as *mut S).drop_in_place();
         });
