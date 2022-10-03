@@ -513,6 +513,13 @@ impl<T> FallibleTask<T> {
     pub async fn cancel(self) -> Option<T> {
         self.task.cancel().await
     }
+
+    /// Returns `true` if the current task is finished.
+    ///
+    /// Note that in a multithreaded environment, this task can change finish immediately after calling this function.
+    pub fn is_finished(&self) -> bool {
+        self.task.is_finished()
+    }
 }
 
 impl<T> Future for FallibleTask<T> {
