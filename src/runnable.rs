@@ -9,7 +9,7 @@ use core::task::Waker;
 use alloc::boxed::Box;
 
 use crate::header::Header;
-use crate::raw::{FutureOrGen, RawTask};
+use crate::raw::RawTask;
 use crate::state::*;
 use crate::Task;
 
@@ -163,7 +163,7 @@ impl<M> Builder<M> {
     /// ```
     pub fn spawn<F, Fut, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<Fut::Output, M>)
     where
-        F: FnOnce(&M) -> Fut + Send + 'static,
+        F: FnOnce(&M) -> Fut,
         Fut: Future + Send + 'static,
         Fut::Output: Send + 'static,
         S: Fn(Runnable<M>) + Send + Sync + 'static,
@@ -210,7 +210,7 @@ impl<M> Builder<M> {
         schedule: S,
     ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
-        F: FnOnce(&M) -> Fut + 'static,
+        F: FnOnce(&M) -> Fut,
         Fut: Future + 'static,
         Fut::Output: 'static,
         S: Fn(Runnable<M>) + Send + Sync + 'static,
@@ -278,9 +278,9 @@ impl<M> Builder<M> {
     ///
     /// # Safety
     ///
-    /// - If `future` is not [`Send`], its [`Runnable`] must be used and dropped on the original
+    /// - If `future`'s output is not [`Send`], its [`Runnable`] must be used and dropped on the original
     ///   thread.
-    /// - If `future` is not `'static`, borrowed variables must outlive its [`Runnable`].
+    /// - If `future`'s output is not `'static`, borrowed variables must outlive its [`Runnable`].
     /// - If `schedule` is not [`Send`] and [`Sync`], the task's [`Waker`] must be used and dropped on
     ///   the original thread.
     /// - If `schedule` is not `'static`, borrowed variables must outlive the task's [`Waker`].
@@ -316,23 +316,15 @@ impl<M> Builder<M> {
         let Self { metadata } = self;
 
         // Allocate large futures on the heap.
-        let ptr = if mem::size_of::<Fut>() >= 2048 || mem::size_of::<F>() >= 2048 {
-            let future = Box::new(|meta| {
+        let ptr = if mem::size_of::<Fut>() >= 2048 {
+            let future = |meta| {
                 let future = future(meta);
                 Box::pin(future)
-            });
+            };
 
-            RawTask::<_, _, Fut::Output, S, M>::allocate(
-                FutureOrGen::Gen(future),
-                schedule,
-                metadata,
-            )
+            RawTask::<_, Fut::Output, S, M>::allocate(future, schedule, metadata)
         } else {
-            RawTask::<Fut, F, Fut::Output, S, M>::allocate(
-                FutureOrGen::Gen(future),
-                schedule,
-                metadata,
-            )
+            RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, metadata)
         };
 
         let runnable = Runnable {

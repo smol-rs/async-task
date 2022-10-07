@@ -65,7 +65,7 @@ pub(crate) struct TaskLayout {
 }
 
 /// Raw pointers to the fields inside a task.
-pub(crate) struct RawTask<F, G, T, S, M> {
+pub(crate) struct RawTask<F, T, S, M> {
     /// The task header.
     pub(crate) header: *const Header<M>,
 
@@ -73,39 +73,21 @@ pub(crate) struct RawTask<F, G, T, S, M> {
     pub(crate) schedule: *const S,
 
     /// The future.
-    pub(crate) future: *mut FutureOrGen<F, G, M>,
+    pub(crate) future: *mut F,
 
     /// The output of the future.
     pub(crate) output: *mut T,
 }
 
-impl<F, G, T, S, M> Copy for RawTask<F, G, T, S, M> {}
+impl<F, T, S, M> Copy for RawTask<F, T, S, M> {}
 
-impl<F, G, T, S, M> Clone for RawTask<F, G, T, S, M> {
+impl<F, T, S, M> Clone for RawTask<F, T, S, M> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-/// Either a future or a function that can be used to generate that future.
-pub(crate) enum FutureOrGen<F, G, M> {
-    /// The future.
-    ///
-    /// The future is logically pinned whenever this object is pinned. It
-    /// should not be moved.
-    Future(F),
-
-    /// The generator function.
-    ///
-    /// The generator function is never logically pinned. It can be moved
-    /// around freely.
-    Gen(G),
-
-    /// Empty slot.
-    Empty(PhantomData<M>),
-}
-
-impl<F, G, T, S, M> RawTask<F, G, T, S, M> {
+impl<F, T, S, M> RawTask<F, T, S, M> {
     const TASK_LAYOUT: Option<TaskLayout> = Self::eval_task_layout();
 
     /// Computes the memory layout for a task.
@@ -114,7 +96,7 @@ impl<F, G, T, S, M> RawTask<F, G, T, S, M> {
         // Compute the layouts for `Header`, `S`, `F`, and `T`.
         let layout_header = Layout::new::<Header<M>>();
         let layout_s = Layout::new::<S>();
-        let layout_f = Layout::new::<FutureOrGen<F, G, M>>();
+        let layout_f = Layout::new::<F>();
         let layout_r = Layout::new::<T>();
 
         // Compute the layout for `union { F, T }`.
@@ -138,12 +120,10 @@ impl<F, G, T, S, M> RawTask<F, G, T, S, M> {
     }
 }
 
-impl<'a, F, G, T, S, M> RawTask<F, G, T, S, M>
+impl<F, T, S, M> RawTask<F, T, S, M>
 where
-    F: Future<Output = T> + 'a,
-    G: FnOnce(&'a M) -> F,
+    F: Future<Output = T>,
     S: Fn(Runnable<M>),
-    M: 'a,
 {
     const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
@@ -155,7 +135,15 @@ where
     /// Allocates a task with the given `future` and `schedule` function.
     ///
     /// It is assumed that initially only the `Runnable` and the `Task` exist.
-    pub(crate) fn allocate(future: FutureOrGen<F, G, M>, schedule: S, metadata: M) -> NonNull<()> {
+    pub(crate) fn allocate<'a, Gen: FnOnce(&'a M) -> F>(
+        future: Gen,
+        schedule: S,
+        metadata: M,
+    ) -> NonNull<()>
+    where
+        F: 'a,
+        M: 'a,
+    {
         // Compute the layout of the task for allocation. Abort if the computation fails.
         //
         // n.b. notgull: task_layout now automatically aborts instead of panicking
@@ -190,6 +178,9 @@ where
             // Write the schedule function as the third field of the task.
             (raw.schedule as *mut S).write(schedule);
 
+            // Generate the future, now that the metadata has been pinned in place.
+            let future = abort_on_panic(|| future(&(*raw.header).metadata));
+
             // Write the future as the fourth field of the task.
             raw.future.write(future);
 
@@ -207,7 +198,7 @@ where
             Self {
                 header: p as *const Header<M>,
                 schedule: p.add(task_layout.offset_s) as *const S,
-                future: p.add(task_layout.offset_f) as *mut FutureOrGen<F, G, M>,
+                future: p.add(task_layout.offset_f) as *mut F,
                 output: p.add(task_layout.offset_r) as *mut T,
             }
         }
@@ -534,8 +525,8 @@ where
 
         // Poll the inner future, but surround it with a guard that closes the task in case polling
         // panics.
-        let guard = Guard::<'a, _, _, _, _, _>(raw, &());
-        let poll = Pin::new_unchecked(&mut *raw.future).poll(cx, &(*raw.header).metadata);
+        let guard = Guard(raw);
+        let poll = <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx);
         mem::forget(guard);
 
         match poll {
@@ -652,19 +643,15 @@ where
         return false;
 
         /// A guard that closes the task if polling its future panics.
-        struct Guard<'a, F, G, T, S, M>(RawTask<F, G, T, S, M>, &'a ())
-        where
-            F: Future<Output = T> + 'a,
-            G: FnOnce(&'a M) -> F,
-            S: Fn(Runnable<M>),
-            M: 'a;
-
-        impl<'a, F, G, T, S, M> Drop for Guard<'a, F, G, T, S, M>
+        struct Guard<F, T, S, M>(RawTask<F, T, S, M>)
         where
             F: Future<Output = T>,
-            G: FnOnce(&'a M) -> F,
+            S: Fn(Runnable<M>);
+
+        impl<F, T, S, M> Drop for Guard<F, T, S, M>
+        where
+            F: Future<Output = T>,
             S: Fn(Runnable<M>),
-            M: 'a,
         {
             fn drop(&mut self) {
                 let raw = self.0;
@@ -679,7 +666,7 @@ where
                         if state & CLOSED != 0 {
                             // The thread that closed the task didn't drop the future because it
                             // was running so now it's our responsibility to do so.
-                            RawTask::<F, G, T, S, M>::drop_future(ptr);
+                            RawTask::<F, T, S, M>::drop_future(ptr);
 
                             // Mark the task as not running and not scheduled.
                             (*raw.header)
@@ -693,7 +680,7 @@ where
                             }
 
                             // Drop the task reference.
-                            RawTask::<F, G, T, S, M>::drop_ref(ptr);
+                            RawTask::<F, T, S, M>::drop_ref(ptr);
 
                             // Notify the awaiter that the future has been dropped.
                             if let Some(w) = awaiter {
@@ -711,7 +698,7 @@ where
                         ) {
                             Ok(state) => {
                                 // Drop the future because the task is now closed.
-                                RawTask::<F, G, T, S, M>::drop_future(ptr);
+                                RawTask::<F, T, S, M>::drop_future(ptr);
 
                                 // Take the awaiter out.
                                 let mut awaiter = None;
@@ -720,7 +707,7 @@ where
                                 }
 
                                 // Drop the task reference.
-                                RawTask::<F, G, T, S, M>::drop_ref(ptr);
+                                RawTask::<F, T, S, M>::drop_ref(ptr);
 
                                 // Notify the awaiter that the future has been dropped.
                                 if let Some(w) = awaiter {
@@ -731,42 +718,6 @@ where
                             Err(s) => state = s,
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-impl<'a, M: 'a, Fut: Future + 'a, Gen: FnOnce(&'a M) -> Fut> FutureOrGen<Fut, Gen, M> {
-    /// Polls the future or runs the generator and then polls the future.
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>, meta: &'a M) -> Poll<Fut::Output> {
-        // SAFETY: We do manual pin projection here.
-        //
-        // - We never use the "fut" reference without pinning it first.
-        // - "Gen" is never logically pinned, so it's okay to move it.
-        unsafe {
-            loop {
-                match self.as_mut().get_unchecked_mut() {
-                    FutureOrGen::Future(fut) => return Pin::new_unchecked(fut).poll(cx),
-
-                    FutureOrGen::Gen(_) => {
-                        // Extract the generator.
-                        let gen = match mem::replace(
-                            self.as_mut().get_unchecked_mut(),
-                            FutureOrGen::Empty(PhantomData),
-                        ) {
-                            FutureOrGen::Gen(gen) => gen,
-                            _ => unreachable!(),
-                        };
-
-                        // Call the generator, making sure to abort if it panics.
-                        let fut = abort_on_panic(move || gen(meta));
-
-                        // Replace the generator with the future.
-                        self.set(FutureOrGen::Future(fut));
-                    }
-
-                    _ => unreachable!("cannot poll an empty hole"),
                 }
             }
         }
