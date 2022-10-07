@@ -6,6 +6,8 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 use core::task::Waker;
 
+use alloc::boxed::Box;
+
 use crate::header::Header;
 use crate::raw::{FutureOrGen, RawTask};
 use crate::state::*;
@@ -317,7 +319,7 @@ impl<M> Builder<M> {
         let ptr = if mem::size_of::<Fut>() >= 2048 || mem::size_of::<F>() >= 2048 {
             let future = Box::new(|meta| {
                 let future = future(meta);
-                alloc::boxed::Box::pin(future)
+                Box::pin(future)
             });
 
             RawTask::<_, _, Fut::Output, S, M>::allocate(
