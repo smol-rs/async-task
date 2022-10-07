@@ -51,7 +51,7 @@ fn metadata_use_case() {
     }
 
     // Unwrap the tasks.
-    smol::block_on(async move {
+    smol::future::block_on(async move {
         t1.await;
         t2.await;
     });
