@@ -7,7 +7,7 @@ use core::sync::atomic::Ordering;
 use core::task::Waker;
 
 use crate::header::Header;
-use crate::raw::RawTask;
+use crate::raw::{FutureOrGen, RawTask};
 use crate::state::*;
 use crate::Task;
 
@@ -35,7 +35,7 @@ impl Builder<()> {
     /// ```
     /// use async_task::Builder;
     ///
-    /// let (runnable, task) = Builder::new().spawn(async {}, |_| {});
+    /// let (runnable, task) = Builder::new().spawn(|()| async {}, |_| {});
     /// ```
     pub fn new() -> Builder<()> {
         Builder { metadata: () }
@@ -96,7 +96,7 @@ impl Builder<()> {
     /// // Spawn a few tasks with different priorities.
     /// let spawn_task = move |priority| {
     ///     let (runnable, task) = Builder::new().metadata(priority).spawn(
-    ///         async move { priority },
+    ///         move |_| async move { priority },
     ///         schedule,
     ///     );
     ///     runnable.schedule();
@@ -157,12 +157,13 @@ impl<M> Builder<M> {
     /// let schedule = move |runnable| s.send(runnable).unwrap();
     ///
     /// // Create a task with the future and the schedule function.
-    /// let (runnable, task) = Builder::new().spawn(future, schedule);
+    /// let (runnable, task) = Builder::new().spawn(|()| future, schedule);
     /// ```
-    pub fn spawn<F, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<F::Output, M>)
+    pub fn spawn<F, Fut, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<Fut::Output, M>)
     where
-        F: Future + 'static,
-        F::Output: 'static,
+        F: FnOnce(&M) -> Fut + Send + 'static,
+        Fut: Future + Send + 'static,
+        Fut::Output: Send + 'static,
         S: Fn(Runnable<M>) + Send + Sync + 'static,
     {
         unsafe { self.spawn_unchecked(future, schedule) }
@@ -198,13 +199,18 @@ impl<M> Builder<M> {
     /// let schedule = move |runnable| s.send(runnable).unwrap();
     ///
     /// // Create a task with the future and the schedule function.
-    /// let (runnable, task) = Builder::new().spawn_local(future, schedule);
+    /// let (runnable, task) = Builder::new().spawn_local(move |()| future, schedule);
     /// ```
     #[cfg(feature = "std")]
-    pub fn spawn_local<F, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<F::Output, M>)
+    pub fn spawn_local<F, Fut, S>(
+        self,
+        future: F,
+        schedule: S,
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
-        F: Future + 'static,
-        F::Output: 'static,
+        F: FnOnce(&M) -> Fut + 'static,
+        Fut: Future + 'static,
+        Fut::Output: 'static,
         S: Fn(Runnable<M>) + Send + Sync + 'static,
     {
         use std::mem::ManuallyDrop;
@@ -251,9 +257,13 @@ impl<M> Builder<M> {
         }
 
         // Wrap the future into one that checks which thread it's on.
-        let future = Checked {
-            id: thread_id(),
-            inner: ManuallyDrop::new(future),
+        let future = move |meta| {
+            let future = future(meta);
+
+            Checked {
+                id: thread_id(),
+                inner: ManuallyDrop::new(future),
+            }
         };
 
         unsafe { self.spawn_unchecked(future, schedule) }
@@ -288,24 +298,39 @@ impl<M> Builder<M> {
     /// let schedule = move |runnable| s.send(runnable).unwrap();
     ///
     /// // Create a task with the future and the schedule function.
-    /// let (runnable, task) = unsafe { Builder::new().spawn_unchecked(future, schedule) };
+    /// let (runnable, task) = unsafe { Builder::new().spawn_unchecked(move |()| future, schedule) };
     /// ```
-    pub unsafe fn spawn_unchecked<F, S>(
+    pub unsafe fn spawn_unchecked<'a, F, Fut, S>(
         self,
         future: F,
         schedule: S,
-    ) -> (Runnable<M>, Task<F::Output, M>)
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
-        F: Future,
+        F: FnOnce(&'a M) -> Fut,
+        Fut: Future + 'a,
         S: Fn(Runnable<M>),
+        M: 'a,
     {
-        // Allocate large futures on the heap.
         let Self { metadata } = self;
-        let ptr = if mem::size_of::<F>() >= 2048 {
-            let future = alloc::boxed::Box::pin(future);
-            RawTask::<_, F::Output, S, M>::allocate(future, schedule, metadata)
+
+        // Allocate large futures on the heap.
+        let ptr = if mem::size_of::<Fut>() >= 2048 || mem::size_of::<F>() >= 2048 {
+            let future = Box::new(|meta| {
+                let future = future(meta);
+                alloc::boxed::Box::pin(future)
+            });
+
+            RawTask::<_, _, Fut::Output, S, M>::allocate(
+                FutureOrGen::Gen(future),
+                schedule,
+                metadata,
+            )
         } else {
-            RawTask::<F, F::Output, S, M>::allocate(future, schedule, metadata)
+            RawTask::<Fut, F, Fut::Output, S, M>::allocate(
+                FutureOrGen::Gen(future),
+                schedule,
+                metadata,
+            )
         };
 
         let runnable = Runnable {
@@ -399,7 +424,7 @@ where
     F::Output: 'static,
     S: Fn(Runnable) + Send + Sync + 'static,
 {
-    Builder::new().spawn_local(future, schedule)
+    Builder::new().spawn_local(move |()| future, schedule)
 }
 
 /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
@@ -436,7 +461,7 @@ where
     F: Future,
     S: Fn(Runnable),
 {
-    Builder::new().spawn_unchecked(future, schedule)
+    Builder::new().spawn_unchecked(move |()| future, schedule)
 }
 
 /// A handle to a runnable task.
