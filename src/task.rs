@@ -8,6 +8,7 @@ use core::sync::atomic::Ordering;
 use core::task::{Context, Poll};
 
 use crate::header::Header;
+use crate::raw::Panic;
 use crate::state::*;
 
 /// A spawned task.
@@ -226,7 +227,7 @@ impl<T, M> Task<T, M> {
     }
 
     /// Puts the task in detached state.
-    fn set_detached(&mut self) -> Option<T> {
+    fn set_detached(&mut self) -> Option<Result<T, Panic>> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header<M>;
 
@@ -256,8 +257,10 @@ impl<T, M> Task<T, M> {
                         ) {
                             Ok(_) => {
                                 // Read the output.
-                                output =
-                                    Some((((*header).vtable.get_output)(ptr) as *mut T).read());
+                                output = Some(
+                                    (((*header).vtable.get_output)(ptr) as *mut Result<T, Panic>)
+                                        .read(),
+                                );
 
                                 // Update the state variable because we're continuing the loop.
                                 state |= CLOSED;
@@ -382,8 +385,22 @@ impl<T, M> Task<T, M> {
                         }
 
                         // Take the output from the task.
-                        let output = ((*header).vtable.get_output)(ptr) as *mut T;
-                        return Poll::Ready(Some(output.read()));
+                        let output = ((*header).vtable.get_output)(ptr) as *mut Result<T, Panic>;
+                        let output = output.read();
+
+                        // Propagate the panic if the task panicked.
+                        let output = match output {
+                            Ok(output) => output,
+                            Err(panic) => {
+                                #[cfg(feature = "std")]
+                                std::panic::resume_unwind(panic);
+
+                                #[cfg(not(feature = "std"))]
+                                match panic {}
+                            }
+                        };
+
+                        return Poll::Ready(Some(output));
                     }
                     Err(s) => state = s,
                 }

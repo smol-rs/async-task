@@ -117,7 +117,7 @@ fn wake_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_ok());
             drop(get_waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -160,7 +160,7 @@ fn cancel_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_ok());
             drop(get_waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -202,7 +202,7 @@ fn wake_and_cancel_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_ok());
             drop(get_waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -256,7 +256,7 @@ fn cancel_and_wake_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_err());
+            assert!(catch_unwind(|| runnable.run()).is_ok());
             drop(get_waker());
             assert_eq!(POLL.load(Ordering::SeqCst), 2);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
@@ -309,7 +309,7 @@ fn panic_and_poll() {
     assert!(try_await(&mut task).is_none());
 
     let runnable = chan.recv().unwrap();
-    assert!(catch_unwind(|| runnable.run()).is_err());
+    assert!(catch_unwind(|| runnable.run()).is_ok());
     assert_eq!(POLL.load(Ordering::SeqCst), 2);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 1);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
