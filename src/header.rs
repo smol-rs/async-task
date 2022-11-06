@@ -10,7 +10,7 @@ use crate::utils::abort_on_panic;
 /// The header of a task.
 ///
 /// This header is stored in memory at the beginning of the heap-allocated task.
-pub(crate) struct Header {
+pub(crate) struct Header<M> {
     /// Current state of the task.
     ///
     /// Contains flags representing the current state and the reference count.
@@ -26,9 +26,14 @@ pub(crate) struct Header {
     /// In addition to the actual waker virtual table, it also contains pointers to several other
     /// methods necessary for bookkeeping the heap-allocated task.
     pub(crate) vtable: &'static TaskVTable,
+
+    /// Metadata associated with the task.
+    ///
+    /// This metadata may be provided to the user.
+    pub(crate) metadata: M,
 }
 
-impl Header {
+impl<M> Header<M> {
     /// Notifies the awaiter blocked on this task.
     ///
     /// If the awaiter is the same as the current waker, it will not be notified.
@@ -145,7 +150,7 @@ impl Header {
     }
 }
 
-impl fmt::Debug for Header {
+impl<M: fmt::Debug> fmt::Debug for Header<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.state.load(Ordering::SeqCst);
 
@@ -157,6 +162,7 @@ impl fmt::Debug for Header {
             .field("awaiter", &(state & AWAITER != 0))
             .field("task", &(state & TASK != 0))
             .field("ref_count", &(state / REFERENCE))
+            .field("metadata", &self.metadata)
             .finish()
     }
 }
