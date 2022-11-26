@@ -454,7 +454,7 @@ impl<T, M: fmt::Debug> fmt::Debug for Task<T, M> {
 /// This can be useful to avoid the panic produced when polling the `Task`
 /// future if the executor dropped its `Runnable`.
 #[must_use = "tasks get canceled when dropped, use `.detach()` to run them in the background"]
-pub struct FallibleTask<T, M> {
+pub struct FallibleTask<T, M = ()> {
     task: Task<T, M>,
 }
 
