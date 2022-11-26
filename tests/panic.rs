@@ -88,7 +88,7 @@ fn cancel_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_ok());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -112,7 +112,7 @@ fn run_and_join() {
     schedule!(s, SCHEDULE, DROP_S);
     let (runnable, task) = async_task::spawn(f, s);
 
-    assert!(catch_unwind(|| runnable.run()).is_ok());
+    assert!(catch_unwind(|| runnable.run()).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -137,7 +137,7 @@ fn try_join_and_run_and_join() {
     assert_eq!(DROP_F.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_S.load(Ordering::SeqCst), 0);
 
-    assert!(catch_unwind(|| runnable.run()).is_ok());
+    assert!(catch_unwind(|| runnable.run()).is_err());
     assert_eq!(POLL.load(Ordering::SeqCst), 1);
     assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
     assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -158,7 +158,7 @@ fn join_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_ok());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -188,7 +188,7 @@ fn try_join_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_ok());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);
@@ -215,7 +215,7 @@ fn detach_during_run() {
 
     Parallel::new()
         .add(|| {
-            assert!(catch_unwind(|| runnable.run()).is_ok());
+            assert!(catch_unwind(|| runnable.run()).is_err());
             assert_eq!(POLL.load(Ordering::SeqCst), 1);
             assert_eq!(SCHEDULE.load(Ordering::SeqCst), 0);
             assert_eq!(DROP_F.load(Ordering::SeqCst), 1);

@@ -144,7 +144,7 @@ where
     pub(crate) fn allocate<'a, Gen: FnOnce(&'a M) -> F>(
         future: Gen,
         schedule: S,
-        metadata: M,
+        builder: crate::Builder<M>,
     ) -> NonNull<()>
     where
         F: 'a,
@@ -164,6 +164,12 @@ where
 
             let raw = Self::from_ptr(ptr.as_ptr());
 
+            let crate::Builder {
+                metadata,
+                #[cfg(feature = "std")]
+                propagate_panic,
+            } = builder;
+
             // Write the header as the first field of the task.
             (raw.header as *mut Header<M>).write(Header {
                 state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
@@ -179,6 +185,8 @@ where
                     layout_info: &Self::TASK_LAYOUT,
                 },
                 metadata,
+                #[cfg(feature = "std")]
+                propagate_panic,
             });
 
             // Write the schedule function as the third field of the task.
@@ -533,16 +541,28 @@ where
         // panics.
         // If available, we should also try to catch the panic so that it is propagated correctly.
         let guard = Guard(raw);
+
+        // Panic propagation is not available for no_std.
         #[cfg(not(feature = "std"))]
         let poll = <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx).map(Ok);
+
         #[cfg(feature = "std")]
-        let poll = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx)
-        })) {
-            Ok(Poll::Ready(v)) => Poll::Ready(Ok(v)),
-            Ok(Poll::Pending) => Poll::Pending,
-            Err(e) => Poll::Ready(Err(e)),
+        let poll = {
+            // Check if we should propagate panics.
+            if (*raw.header).propagate_panic {
+                // Use catch_unwind to catch the panic.
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx)
+                })) {
+                    Ok(Poll::Ready(v)) => Poll::Ready(Ok(v)),
+                    Ok(Poll::Pending) => Poll::Pending,
+                    Err(e) => Poll::Ready(Err(e)),
+                }
+            } else {
+                <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx).map(Ok)
+            }
         };
+
         mem::forget(guard);
 
         match poll {
