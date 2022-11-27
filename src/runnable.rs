@@ -17,7 +17,11 @@ use crate::Task;
 #[derive(Debug)]
 pub struct Builder<M> {
     /// The metadata associated with the task.
-    metadata: M,
+    pub(crate) metadata: M,
+
+    /// Whether or not a panic that occurs in the task should be propagated.
+    #[cfg(feature = "std")]
+    pub(crate) propagate_panic: bool,
 }
 
 impl<M: Default> Default for Builder<M> {
@@ -40,7 +44,11 @@ impl Builder<()> {
     /// let (runnable, task) = Builder::new().spawn(|()| async {}, |_| {});
     /// ```
     pub fn new() -> Builder<()> {
-        Builder { metadata: () }
+        Builder {
+            metadata: (),
+            #[cfg(feature = "std")]
+            propagate_panic: false,
+        }
     }
 
     /// Adds metadata to the task.
@@ -123,11 +131,63 @@ impl Builder<()> {
     /// # });
     /// ```
     pub fn metadata<M>(self, metadata: M) -> Builder<M> {
-        Builder { metadata }
+        Builder {
+            metadata,
+            #[cfg(feature = "std")]
+            propagate_panic: self.propagate_panic,
+        }
     }
 }
 
 impl<M> Builder<M> {
+    /// Propagates panics that occur in the task.
+    ///
+    /// When this is `true`, panics that occur in the task will be propagated to the caller of
+    /// the [`Task`]. When this is false, no special action is taken when a panic occurs in the
+    /// task, meaning that the caller of [`Runnable::run`] will observe a panic.
+    ///
+    /// This is only available when the `std` feature is enabled. By default, this is `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_task::Builder;
+    /// use futures_lite::future::poll_fn;
+    /// use std::future::Future;
+    /// use std::panic;
+    /// use std::pin::Pin;
+    /// use std::task::{Context, Poll};
+    ///
+    /// fn did_panic<F: FnOnce()>(f: F) -> bool {
+    ///     panic::catch_unwind(panic::AssertUnwindSafe(f)).is_err()
+    /// }
+    ///
+    /// # smol::future::block_on(async {
+    /// let (runnable1, mut task1) = Builder::new()
+    ///    .propagate_panic(true)
+    ///    .spawn(|()| async move { panic!() }, |_| {});
+    ///
+    /// let (runnable2, mut task2) = Builder::new()
+    ///    .propagate_panic(false)
+    ///    .spawn(|()| async move { panic!() }, |_| {});
+    ///
+    /// assert!(!did_panic(|| { runnable1.run(); }));
+    /// assert!(did_panic(|| { runnable2.run(); }));
+    ///
+    /// let waker = poll_fn(|cx| Poll::Ready(cx.waker().clone())).await;
+    /// let mut cx = Context::from_waker(&waker);
+    /// assert!(did_panic(|| { let _ = Pin::new(&mut task1).poll(&mut cx); }));
+    /// assert!(did_panic(|| { let _ = Pin::new(&mut task2).poll(&mut cx); }));
+    /// # });
+    /// ```
+    #[cfg(feature = "std")]
+    pub fn propagate_panic(self, propagate_panic: bool) -> Builder<M> {
+        Builder {
+            metadata: self.metadata,
+            propagate_panic,
+        }
+    }
+
     /// Creates a new task.
     ///
     /// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
@@ -313,8 +373,6 @@ impl<M> Builder<M> {
         S: Fn(Runnable<M>),
         M: 'a,
     {
-        let Self { metadata } = self;
-
         // Allocate large futures on the heap.
         let ptr = if mem::size_of::<Fut>() >= 2048 {
             let future = |meta| {
@@ -322,9 +380,9 @@ impl<M> Builder<M> {
                 Box::pin(future)
             };
 
-            RawTask::<_, Fut::Output, S, M>::allocate(future, schedule, metadata)
+            RawTask::<_, Fut::Output, S, M>::allocate(future, schedule, self)
         } else {
-            RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, metadata)
+            RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, self)
         };
 
         let runnable = Runnable {

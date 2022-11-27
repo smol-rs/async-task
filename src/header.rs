@@ -31,6 +31,10 @@ pub(crate) struct Header<M> {
     ///
     /// This metadata may be provided to the user.
     pub(crate) metadata: M,
+
+    /// Whether or not a panic that occurs in the task should be propagated.
+    #[cfg(feature = "std")]
+    pub(crate) propagate_panic: bool,
 }
 
 impl<M> Header<M> {

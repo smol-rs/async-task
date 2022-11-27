@@ -23,6 +23,7 @@ atomic-waker = "1"
 easy-parallel = "3"
 flaky_test = "0.1"
 flume = { version = "0.10", default-features = false }
+futures-lite = "1.12.0"
 once_cell = "1"
 smol = "1"
 

@@ -13,6 +13,12 @@ use crate::state::*;
 use crate::utils::{abort, abort_on_panic, max, Layout};
 use crate::Runnable;
 
+#[cfg(feature = "std")]
+pub(crate) type Panic = alloc::boxed::Box<dyn core::any::Any + Send + 'static>;
+
+#[cfg(not(feature = "std"))]
+pub(crate) type Panic = core::convert::Infallible;
+
 /// The vtable for a task.
 pub(crate) struct TaskVTable {
     /// Schedules the task.
@@ -76,7 +82,7 @@ pub(crate) struct RawTask<F, T, S, M> {
     pub(crate) future: *mut F,
 
     /// The output of the future.
-    pub(crate) output: *mut T,
+    pub(crate) output: *mut Result<T, Panic>,
 }
 
 impl<F, T, S, M> Copy for RawTask<F, T, S, M> {}
@@ -97,7 +103,7 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
         let layout_header = Layout::new::<Header<M>>();
         let layout_s = Layout::new::<S>();
         let layout_f = Layout::new::<F>();
-        let layout_r = Layout::new::<T>();
+        let layout_r = Layout::new::<Result<T, Panic>>();
 
         // Compute the layout for `union { F, T }`.
         let size_union = max(layout_f.size(), layout_r.size());
@@ -138,7 +144,7 @@ where
     pub(crate) fn allocate<'a, Gen: FnOnce(&'a M) -> F>(
         future: Gen,
         schedule: S,
-        metadata: M,
+        builder: crate::Builder<M>,
     ) -> NonNull<()>
     where
         F: 'a,
@@ -158,6 +164,12 @@ where
 
             let raw = Self::from_ptr(ptr.as_ptr());
 
+            let crate::Builder {
+                metadata,
+                #[cfg(feature = "std")]
+                propagate_panic,
+            } = builder;
+
             // Write the header as the first field of the task.
             (raw.header as *mut Header<M>).write(Header {
                 state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
@@ -173,6 +185,8 @@ where
                     layout_info: &Self::TASK_LAYOUT,
                 },
                 metadata,
+                #[cfg(feature = "std")]
+                propagate_panic,
             });
 
             // Write the schedule function as the third field of the task.
@@ -199,7 +213,7 @@ where
                 header: p as *const Header<M>,
                 schedule: p.add(task_layout.offset_s) as *const S,
                 future: p.add(task_layout.offset_f) as *mut F,
-                output: p.add(task_layout.offset_r) as *mut T,
+                output: p.add(task_layout.offset_r) as *mut Result<T, Panic>,
             }
         }
     }
@@ -525,8 +539,30 @@ where
 
         // Poll the inner future, but surround it with a guard that closes the task in case polling
         // panics.
+        // If available, we should also try to catch the panic so that it is propagated correctly.
         let guard = Guard(raw);
-        let poll = <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx);
+
+        // Panic propagation is not available for no_std.
+        #[cfg(not(feature = "std"))]
+        let poll = <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx).map(Ok);
+
+        #[cfg(feature = "std")]
+        let poll = {
+            // Check if we should propagate panics.
+            if (*raw.header).propagate_panic {
+                // Use catch_unwind to catch the panic.
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx)
+                })) {
+                    Ok(Poll::Ready(v)) => Poll::Ready(Ok(v)),
+                    Ok(Poll::Pending) => Poll::Pending,
+                    Err(e) => Poll::Ready(Err(e)),
+                }
+            } else {
+                <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx).map(Ok)
+            }
+        };
+
         mem::forget(guard);
 
         match poll {
