@@ -36,6 +36,26 @@ pub(crate) fn abort_on_panic<T>(f: impl FnOnce() -> T) -> T {
     t
 }
 
+/// Run a future that aborts on panic.
+///
+/// Only used during scoping.
+#[cfg(feature = "scope")]
+#[inline]
+pub(crate) async fn abort_on_panic_future<F: core::future::Future>(f: F) -> F::Output {
+    struct Bomb;
+
+    impl Drop for Bomb {
+        fn drop(&mut self) {
+            abort();
+        }
+    }
+
+    let bomb = Bomb;
+    let t = f.await;
+    mem::forget(bomb);
+    t
+}
+
 /// A version of `alloc::alloc::Layout` that can be used in the const
 /// position.
 #[derive(Clone, Copy, Debug)]

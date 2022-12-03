@@ -17,6 +17,7 @@ exclude = ["/.*"]
 [features]
 default = ["std"]
 std = []
+scope = ["async-channel", "concurrent-queue"]
 
 [dev-dependencies]
 atomic-waker = "1"
@@ -30,3 +31,7 @@ smol = "1"
 # rewrite dependencies to use the this version of async-task when running tests
 [patch.crates-io]
 async-task = { path = "." }
+
+[dependencies]
+async-channel = { version = "1.8.0", optional = true, default-features = false }
+concurrent-queue = { version = "2.0.0", optional = true, default-features = false }

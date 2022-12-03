@@ -92,8 +92,14 @@ mod state;
 mod task;
 mod utils;
 
+#[cfg(feature = "scope")]
+mod scope;
+
 pub use crate::runnable::{spawn, spawn_unchecked, Builder, Runnable};
 pub use crate::task::{FallibleTask, Task};
 
 #[cfg(feature = "std")]
 pub use crate::runnable::spawn_local;
+
+#[cfg(feature = "scope")]
+pub use scope::{scope, Scope};
