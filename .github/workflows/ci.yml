@@ -32,7 +32,7 @@ jobs:
       - run: cargo build --all --all-features --all-targets
         if: startsWith(matrix.rust, 'nightly')
       - run: cargo hack build --feature-powerset --no-dev-deps
-      - run: cargo hack build --feature-powerset --no-dev-deps --target thumbv7m-none-eabi --skip std,default
+      - run: cargo hack build --feature-powerset --no-dev-deps --target thumbv7m-none-eabi --skip std,default,scope
       - run: cargo test
       - name: Run cargo test (with valgrind)
         run: cargo test -- --test-threads=1
