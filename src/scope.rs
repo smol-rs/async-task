@@ -70,6 +70,8 @@ impl<M> Builder<M> {
 /// prevent a use-after-free (e.g. the task outliving the scope), the scope will not return until all
 /// tasks spawned within it have completed. This is similar to the [`scope`] function from the
 /// [`crossbeam`] crate.
+/// 
+/// This function is only available when the `scope` feature is enabled.
 ///
 /// [`scope`]: https://docs.rs/crossbeam-utils/latest/crossbeam_utils/thread/index.html
 /// [`crossbeam`]: https://crates.io/crates/crossbeam
@@ -172,7 +174,7 @@ pub struct Scope<'env, M> {
     /// A channel used to signal that an operation is complete.
     ///
     /// Ideally, we'd just use events with tags in them, but the API for that is still being
-    /// decided. See https://github.com/smol-rs/event-listener/pull/40. For now, we just use
+    /// decided. See <https://github.com/smol-rs/event-listener/pull/40>. For now, we just use
     /// a channel.
     completion_channel: (Sender<usize>, Receiver<usize>),
 
