@@ -495,7 +495,6 @@ impl<M> Builder<M> {
         S: Fn(Runnable<M>),
         M: 'a,
     {
-        // Allocate large futures on the heap.
         self.spawn_unchecked2(future, move |task, _| schedule(task))
     }
 
