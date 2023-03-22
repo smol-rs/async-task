@@ -249,7 +249,7 @@ impl<M> Builder<M> {
     ///
     /// # Arguments
     ///
-    /// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+    /// - `woken_while_running` - the second argument in the schedule function, set true when the
     ///   task is woken up while running.
     ///
     /// # Examples
@@ -346,7 +346,7 @@ impl<M> Builder<M> {
     ///
     /// # Arguments
     ///
-    /// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+    /// - `woken_while_running` - the second argument in the schedule function, set true when the
     ///   task is woken up while running.
     ///
     /// # Examples
@@ -507,7 +507,7 @@ impl<M> Builder<M> {
     ///
     /// # Arguments
     ///
-    /// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+    /// - `woken_while_running` - the second argument in the schedule function, set true when the
     ///   task is woken up while running.
     ///
     /// # Safety
@@ -641,7 +641,7 @@ where
 ///
 /// # Arguments
 ///
-/// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+/// - `woken_while_running` - the second argument in the schedule function, set true when the
 ///   task is woken up while running.
 ///
 /// # Examples
@@ -732,7 +732,7 @@ where
 ///
 /// # Arguments
 ///
-/// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+/// - `woken_while_running` - the second argument in the schedule function, set true when the
 ///   task is woken up while running.
 ///
 /// # Examples
@@ -826,7 +826,7 @@ where
 ///
 /// # Arguments
 ///
-/// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+/// - `woken_while_running` - the second argument in the schedule function, set true when the
 ///   task is woken while running.
 ///
 /// # Safety
