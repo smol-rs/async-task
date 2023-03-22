@@ -22,7 +22,7 @@ pub(crate) type Panic = core::convert::Infallible;
 /// The vtable for a task.
 pub(crate) struct TaskVTable {
     /// Schedules the task.
-    pub(crate) schedule: unsafe fn(*const ()),
+    pub(crate) schedule: unsafe fn(*const (), bool),
 
     /// Drops the future inside the task.
     pub(crate) drop_future: unsafe fn(*const ()),
@@ -129,7 +129,7 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
 impl<F, T, S, M> RawTask<F, T, S, M>
 where
     F: Future<Output = T>,
-    S: Fn(Runnable<M>),
+    S: Fn(Runnable<M>, bool),
 {
     const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
@@ -279,7 +279,7 @@ where
                         // time to schedule it.
                         if state & RUNNING == 0 {
                             // Schedule the task.
-                            Self::schedule(ptr);
+                            Self::schedule(ptr, false);
                         } else {
                             // Drop the waker.
                             Self::drop_waker(ptr);
@@ -348,7 +348,7 @@ where
                                 ptr: NonNull::new_unchecked(ptr as *mut ()),
                                 _marker: PhantomData,
                             };
-                            (*raw.schedule)(task);
+                            (*raw.schedule)(task, false);
                         }
 
                         break;
@@ -396,7 +396,7 @@ where
                 (*raw.header)
                     .state
                     .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
-                Self::schedule(ptr);
+                Self::schedule(ptr, true);
             } else {
                 // Otherwise, destroy the task right away.
                 Self::destroy(ptr);
@@ -426,7 +426,7 @@ where
     ///
     /// This function doesn't modify the state of the task. It only passes the task reference to
     /// its schedule function.
-    unsafe fn schedule(ptr: *const ()) {
+    unsafe fn schedule(ptr: *const (), woken_while_running: bool) {
         let raw = Self::from_ptr(ptr);
 
         // If the schedule function has captured variables, create a temporary waker that prevents
@@ -440,7 +440,7 @@ where
             ptr: NonNull::new_unchecked(ptr as *mut ()),
             _marker: PhantomData,
         };
-        (*raw.schedule)(task);
+        (*raw.schedule)(task, woken_while_running);
     }
 
     /// Drops the future inside a task.
@@ -662,7 +662,7 @@ where
                             } else if state & SCHEDULED != 0 {
                                 // The thread that woke the task up didn't reschedule it because
                                 // it was running so now it's our responsibility to do so.
-                                Self::schedule(ptr);
+                                Self::schedule(ptr, true);
                                 return true;
                             } else {
                                 // Drop the task reference.
@@ -682,12 +682,12 @@ where
         struct Guard<F, T, S, M>(RawTask<F, T, S, M>)
         where
             F: Future<Output = T>,
-            S: Fn(Runnable<M>);
+            S: Fn(Runnable<M>, bool);
 
         impl<F, T, S, M> Drop for Guard<F, T, S, M>
         where
             F: Future<Output = T>,
-            S: Fn(Runnable<M>),
+            S: Fn(Runnable<M>, bool),
         {
             fn drop(&mut self) {
                 let raw = self.0;

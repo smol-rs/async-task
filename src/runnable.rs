@@ -231,6 +231,65 @@ impl<M> Builder<M> {
         unsafe { self.spawn_unchecked(future, schedule) }
     }
 
+    /// Creates a new task, with an additional argument in the schedule function.
+    ///
+    /// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
+    /// output.
+    ///
+    /// Method [`run()`][`Runnable::run()`] polls the task's future once. Then, the [`Runnable`]
+    /// vanishes and only reappears when its [`Waker`] wakes the task, thus scheduling it to be run
+    /// again.
+    ///
+    /// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
+    /// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
+    /// should push it into a task queue so that it can be processed later.
+    ///
+    /// If you need to spawn a future that does not implement [`Send`] or isn't `'static`, consider
+    /// using [`spawn_local2()`] or [`spawn_unchecked2()`] instead.
+    ///
+    /// # Arguments
+    ///
+    /// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+    ///   task is woken up while running.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_task::Builder;
+    /// use std::sync::{Arc, Mutex};
+    ///
+    /// // The future inside the task.
+    /// let future = async {
+    ///     println!("Hello, world!");
+    /// };
+    ///
+    /// // A function that schedules the task when it gets woken up while runninng.
+    /// let (s, r) = flume::unbounded();
+    /// // Otherwise, it will be placed into this slot.
+    /// let lifo_slot = Arc::new(Mutex::new(None));
+    /// let schedule = move |runnable, woken_while_running| {
+    ///     if woken_while_running {
+    ///         s.send(runnable).unwrap()
+    ///     } else {
+    ///         let last = lifo_slot.lock().unwrap().replace(runnable);
+    ///         if let Some(last) = last {
+    ///             s.send(last).unwrap()
+    ///         }
+    ///     }
+    /// };
+    /// // Create a task with the future and the schedule function.
+    /// let (runnable, task) = Builder::new().spawn2(|()| future, schedule);
+    /// ```
+    pub fn spawn2<F, Fut, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<Fut::Output, M>)
+    where
+        F: FnOnce(&M) -> Fut,
+        Fut: Future + Send + 'static,
+        Fut::Output: Send + 'static,
+        S: Fn(Runnable<M>, bool) + Send + Sync + 'static,
+    {
+        unsafe { self.spawn_unchecked2(future, schedule) }
+    }
+
     /// Creates a new thread-local task.
     ///
     /// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
@@ -274,6 +333,69 @@ impl<M> Builder<M> {
         Fut: Future + 'static,
         Fut::Output: 'static,
         S: Fn(Runnable<M>) + Send + Sync + 'static,
+    {
+        self.spawn_local2(future, move |runnable, _| schedule(runnable))
+    }
+
+    /// Creates a new thread-local task, with an additional argument in the schedule function..
+    ///
+    /// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
+    /// [`Runnable`] is used or dropped on another thread, a panic will occur.
+    ///
+    /// This function is only available when the `std` feature for this crate is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+    ///   task is woken up while running.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_task::{Builder, Runnable};
+    /// use flume::{Receiver, Sender};
+    /// use std::{rc::Rc, cell::RefCell};
+    ///
+    /// thread_local! {
+    ///     // A queue that holds scheduled tasks.
+    ///     static QUEUE: (Sender<Runnable>, Receiver<Runnable>) = flume::unbounded();
+    ///
+    ///     // A slot intended to be fetched first when picking tasks to run.
+    ///     static LIFO_SLOT: RefCell<Option<Runnable>> = RefCell::new(None);
+    /// }
+    ///
+    /// // Make a non-Send future.
+    /// let msg: Rc<str> = "Hello, world!".into();
+    /// let future = async move {
+    ///     println!("{}", msg);
+    /// };
+    ///
+    /// // A function that schedules the task when it gets woken up.
+    /// let s = QUEUE.with(|(s, _)| s.clone());
+    /// let schedule = move |runnable, woken_while_running| {
+    ///     if woken_while_running {
+    ///         s.send(runnable).unwrap()
+    ///     } else {
+    ///         let last = LIFO_SLOT.with(|slot| slot.borrow_mut().replace(runnable));
+    ///         if let Some(last) = last {
+    ///             s.send(last).unwrap()
+    ///         }
+    ///     }
+    /// };
+    /// // Create a task with the future and the schedule function.
+    /// let (runnable, task) = Builder::new().spawn_local2(move |()| future, schedule);
+    /// ```
+    #[cfg(feature = "std")]
+    pub fn spawn_local2<F, Fut, S>(
+        self,
+        future: F,
+        schedule: S,
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
+    where
+        F: FnOnce(&M) -> Fut,
+        Fut: Future + 'static,
+        Fut::Output: 'static,
+        S: Fn(Runnable<M>, bool) + Send + Sync + 'static,
     {
         use std::mem::ManuallyDrop;
         use std::pin::Pin;
@@ -328,7 +450,7 @@ impl<M> Builder<M> {
             }
         };
 
-        unsafe { self.spawn_unchecked(future, schedule) }
+        unsafe { self.spawn_unchecked2(future, schedule) }
     }
 
     /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
@@ -371,6 +493,70 @@ impl<M> Builder<M> {
         F: FnOnce(&'a M) -> Fut,
         Fut: Future + 'a,
         S: Fn(Runnable<M>),
+        M: 'a,
+    {
+        // Allocate large futures on the heap.
+        self.spawn_unchecked2(future, move |task, _| schedule(task))
+    }
+
+    /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds, with an additional argument
+    /// in the schedule function.
+    ///
+    /// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
+    /// `'static` on `future` and `schedule`.
+    ///
+    /// # Arguments
+    ///
+    /// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+    ///   task is woken up while running.
+    ///
+    /// # Safety
+    ///
+    /// - If `future`'s output is not [`Send`], its [`Runnable`] must be used and dropped on the original
+    ///   thread.
+    /// - If `future`'s output is not `'static`, borrowed variables must outlive its [`Runnable`].
+    /// - If `schedule` is not [`Send`] and [`Sync`], the task's [`Waker`] must be used and dropped on
+    ///   the original thread.
+    /// - If `schedule` is not `'static`, borrowed variables must outlive the task's [`Waker`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_task::Builder;
+    /// use std::sync::{Arc, Mutex};
+    ///
+    /// // The future inside the task.
+    /// let future = async {
+    ///     println!("Hello, world!");
+    /// };
+    ///
+    /// // If the task gets woken up while running, it will be sent into this channel.
+    /// let (s, r) = flume::unbounded();
+    /// // Otherwise, it will be placed into this slot.
+    /// let lifo_slot = Arc::new(Mutex::new(None));
+    /// let schedule = move |runnable, woken_while_running| {
+    ///     if woken_while_running {
+    ///         s.send(runnable).unwrap()
+    ///     } else {
+    ///         let last = lifo_slot.lock().unwrap().replace(runnable);
+    ///         if let Some(last) = last {
+    ///             s.send(last).unwrap()
+    ///         }
+    ///     }
+    /// };
+    ///
+    /// // Create a task with the future and the schedule function.
+    /// let (runnable, task) = unsafe { Builder::new().spawn_unchecked2(move |()| future, schedule) };
+    /// ```
+    pub unsafe fn spawn_unchecked2<'a, F, Fut, S>(
+        self,
+        future: F,
+        schedule: S,
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
+    where
+        F: FnOnce(&'a M) -> Fut,
+        Fut: Future + 'a,
+        S: Fn(Runnable<M>, bool),
         M: 'a,
     {
         // Allocate large futures on the heap.
@@ -437,6 +623,64 @@ where
     unsafe { spawn_unchecked(future, schedule) }
 }
 
+/// Creates a new task, with an additional argument in the schedule function.
+///
+/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
+/// output.
+///
+/// Method [`run()`][`Runnable::run()`] polls the task's future once. Then, the [`Runnable`]
+/// vanishes and only reappears when its [`Waker`] wakes the task, thus scheduling it to be run
+/// again.
+///
+/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
+/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
+/// should push it into a task queue so that it can be processed later.
+///
+/// If you need to spawn a future that does not implement [`Send`] or isn't `'static`, consider
+/// using [`spawn_local2()`] or [`spawn_unchecked2()`] instead.
+///
+/// # Arguments
+///
+/// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+///   task is woken up while running.
+///
+/// # Examples
+///
+/// ```
+/// use async_task::Builder;
+/// use std::sync::{Arc, Mutex};
+///
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
+///
+/// // A function that schedules the task when it gets woken up while runninng.
+/// let (s, r) = flume::unbounded();
+/// // Otherwise, it will be placed into this slot.
+/// let lifo_slot = Arc::new(Mutex::new(None));
+/// let schedule = move |runnable, woken_while_running| {
+///     if woken_while_running {
+///         s.send(runnable).unwrap()
+///     } else {
+///         let last = lifo_slot.lock().unwrap().replace(runnable);
+///         if let Some(last) = last {
+///             s.send(last).unwrap()
+///         }
+///     }
+/// };
+/// // Create a task with the future and the schedule function.
+/// let (runnable, task) = Builder::new().spawn2(|()| future, schedule);
+/// ```
+pub fn spawn2<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+    S: Fn(Runnable, bool) + Send + Sync + 'static,
+{
+    unsafe { spawn_unchecked2(future, schedule) }
+}
+
 /// Creates a new thread-local task.
 ///
 /// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
@@ -479,6 +723,64 @@ where
     Builder::new().spawn_local(move |()| future, schedule)
 }
 
+/// Creates a new thread-local task, with an additional argument in the schedule function..
+///
+/// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
+/// [`Runnable`] is used or dropped on another thread, a panic will occur.
+///
+/// This function is only available when the `std` feature for this crate is enabled.
+///
+/// # Arguments
+///
+/// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+///   task is woken up while running.
+///
+/// # Examples
+///
+/// ```
+/// use async_task::{Builder, Runnable};
+/// use flume::{Receiver, Sender};
+/// use std::{rc::Rc, cell::RefCell};
+///
+/// thread_local! {
+///     // A queue that holds scheduled tasks.
+///     static QUEUE: (Sender<Runnable>, Receiver<Runnable>) = flume::unbounded();
+///
+///     // A slot intended to be fetched first when picking tasks to run.
+///     static LIFO_SLOT: RefCell<Option<Runnable>> = RefCell::new(None);
+/// }
+///
+/// // Make a non-Send future.
+/// let msg: Rc<str> = "Hello, world!".into();
+/// let future = async move {
+///     println!("{}", msg);
+/// };
+///
+/// // A function that schedules the task when it gets woken up.
+/// let s = QUEUE.with(|(s, _)| s.clone());
+/// let schedule = move |runnable, woken_while_running| {
+///     if woken_while_running {
+///         s.send(runnable).unwrap()
+///     } else {
+///         let last = LIFO_SLOT.with(|slot| slot.borrow_mut().replace(runnable));
+///         if let Some(last) = last {
+///             s.send(last).unwrap()
+///         }
+///     }
+/// };
+/// // Create a task with the future and the schedule function.
+/// let (runnable, task) = Builder::new().spawn_local2(move |()| future, schedule);
+/// ```
+#[cfg(feature = "std")]
+pub fn spawn_local2<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
+where
+    F: Future + 'static,
+    F::Output: 'static,
+    S: Fn(Runnable, bool) + Send + Sync + 'static,
+{
+    Builder::new().spawn_local2(move |()| future, schedule)
+}
+
 /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
 ///
 /// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
@@ -514,6 +816,63 @@ where
     S: Fn(Runnable),
 {
     Builder::new().spawn_unchecked(move |()| future, schedule)
+}
+
+/// Creates a new task without [`Send`], [`Sync`], and `'static` bounds, with an additional argument
+/// in the schedule function.
+///
+/// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
+/// `'static` on `future` and `schedule`.
+///
+/// # Arguments
+///
+/// - `woken_while_running` - e.g. the second argument in the schedule function, set true when the
+///   task is woken while running.
+///
+/// # Safety
+///
+/// - If `future`'s output is not [`Send`], its [`Runnable`] must be used and dropped on the original
+///   thread.
+/// - If `future`'s output is not `'static`, borrowed variables must outlive its [`Runnable`].
+/// - If `schedule` is not [`Send`] and [`Sync`], the task's [`Waker`] must be used and dropped on
+///   the original thread.
+/// - If `schedule` is not `'static`, borrowed variables must outlive the task's [`Waker`].
+///
+/// # Examples
+///
+/// ```
+/// use async_task::Builder;
+/// use std::sync::{Arc, Mutex};
+///
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
+///
+/// // If the task gets woken up while running, it will be sent into this channel.
+/// let (s, r) = flume::unbounded();
+/// // Otherwise, it will be placed into this slot.
+/// let lifo_slot = Arc::new(Mutex::new(None));
+/// let schedule = move |runnable, woken_while_running| {
+///     if woken_while_running {
+///         s.send(runnable).unwrap()
+///     } else {
+///         let last = lifo_slot.lock().unwrap().replace(runnable);
+///         if let Some(last) = last {
+///             s.send(last).unwrap()
+///         }
+///     }
+/// };
+///
+/// // Create a task with the future and the schedule function.
+/// let (runnable, task) = unsafe { Builder::new().spawn_unchecked2(move |()| future, schedule) };
+/// ```
+pub unsafe fn spawn_unchecked2<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
+where
+    F: Future,
+    S: Fn(Runnable, bool),
+{
+    Builder::new().spawn_unchecked2(move |()| future, schedule)
 }
 
 /// A handle to a runnable task.
@@ -604,7 +963,7 @@ impl<M> Runnable<M> {
         mem::forget(self);
 
         unsafe {
-            ((*header).vtable.schedule)(ptr);
+            ((*header).vtable.schedule)(ptr, false);
         }
     }
 
