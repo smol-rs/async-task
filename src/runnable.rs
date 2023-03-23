@@ -13,6 +13,15 @@ use crate::raw::RawTask;
 use crate::state::*;
 use crate::Task;
 
+mod sealed {
+    use super::*;
+    pub trait Sealed<M> {}
+
+    impl<M, F> Sealed<M> for F where F: Fn(Runnable<M>) {}
+
+    impl<M, F> Sealed<M> for WithInfo<F> where F: Fn(Runnable<M>, ScheduleInfo) {}
+}
+
 /// A builder that creates a new task.
 #[derive(Debug)]
 pub struct Builder<M> {
@@ -27,6 +36,135 @@ pub struct Builder<M> {
 impl<M: Default> Default for Builder<M> {
     fn default() -> Self {
         Builder::new().metadata(M::default())
+    }
+}
+
+/// Extra scheduling information that can be passed to the scheduling function.
+///
+/// The data source of this struct is directly from the actual implementation
+/// of the crate itself, different from [`Runnable`]'s metadata, which is
+/// managed by the caller.
+///
+/// # Examples
+///
+/// ```
+/// use async_task::{Runnable, ScheduleInfo, WithInfo};
+/// use std::sync::{Arc, Mutex};
+///
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
+///
+/// // If the task gets woken up while running, it will be sent into this channel.
+/// let (s, r) = flume::unbounded();
+/// // Otherwise, it will be placed into this slot.
+/// let lifo_slot = Arc::new(Mutex::new(None));
+/// let schedule = move |runnable: Runnable, info: ScheduleInfo| {
+///     if info.woken_while_running {
+///         s.send(runnable).unwrap()
+///     } else {
+///         let last = lifo_slot.lock().unwrap().replace(runnable);
+///         if let Some(last) = last {
+///             s.send(last).unwrap()
+///         }
+///     }
+/// };
+///
+/// // Create the actual scheduler to be spawned with some future.
+/// let scheduler = WithInfo(schedule);
+/// // Create a task with the future and the scheduler.
+/// let (runnable, task) = async_task::spawn(future, scheduler);
+/// ```
+#[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
+pub struct ScheduleInfo {
+    /// Indicates whether the task gets woken up while running.
+    ///
+    /// It is set to true usually because the task has yielded itself to the
+    /// scheduler.
+    pub woken_while_running: bool,
+}
+
+impl ScheduleInfo {
+    pub(crate) fn new(woken_while_running: bool) -> Self {
+        ScheduleInfo {
+            woken_while_running,
+        }
+    }
+}
+
+/// The trait for scheduling functions.
+pub trait Schedule<M = ()>: sealed::Sealed<M> {
+    /// The actual scheduling procedure.
+    fn schedule(&self, runnable: Runnable<M>, info: ScheduleInfo);
+}
+
+impl<M, F> Schedule<M> for F
+where
+    F: Fn(Runnable<M>),
+{
+    fn schedule(&self, runnable: Runnable<M>, _: ScheduleInfo) {
+        self(runnable)
+    }
+}
+
+/// Pass a scheduling function with more scheduling information - a.k.a.
+/// [`ScheduleInfo`].
+///
+/// Sometimes, it's useful to pass the runnable's state directly to the
+/// scheduling function, such as whether it's woken up while running. The
+/// scheduler can thus use the information to determine its scheduling
+/// strategy.
+///
+/// The data source of [`ScheduleInfo`] is directly from the actual
+/// implementation of the crate itself, different from [`Runnable`]'s metadata,
+/// which is managed by the caller.
+///
+/// # Examples
+///
+/// ```
+/// use async_task::{ScheduleInfo, WithInfo};
+/// use std::sync::{Arc, Mutex};
+///
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
+///
+/// // If the task gets woken up while running, it will be sent into this channel.
+/// let (s, r) = flume::unbounded();
+/// // Otherwise, it will be placed into this slot.
+/// let lifo_slot = Arc::new(Mutex::new(None));
+/// let schedule = move |runnable, info: ScheduleInfo| {
+///     if info.woken_while_running {
+///         s.send(runnable).unwrap()
+///     } else {
+///         let last = lifo_slot.lock().unwrap().replace(runnable);
+///         if let Some(last) = last {
+///             s.send(last).unwrap()
+///         }
+///     }
+/// };
+///
+/// // Create a task with the future and the schedule function.
+/// let (runnable, task) = async_task::spawn(future, WithInfo(schedule));
+/// ```
+#[derive(Debug)]
+pub struct WithInfo<F>(pub F);
+
+impl<F> From<F> for WithInfo<F> {
+    fn from(value: F) -> Self {
+        WithInfo(value)
+    }
+}
+
+impl<M, F> Schedule<M> for WithInfo<F>
+where
+    F: Fn(Runnable<M>, ScheduleInfo),
+{
+    fn schedule(&self, runnable: Runnable<M>, info: ScheduleInfo) {
+        (self.0)(runnable, info)
     }
 }
 
@@ -226,7 +364,7 @@ impl<M> Builder<M> {
         F: FnOnce(&M) -> Fut,
         Fut: Future + Send + 'static,
         Fut::Output: Send + 'static,
-        S: Fn(Runnable<M>) + Send + Sync + 'static,
+        S: Schedule<M> + Send + Sync + 'static,
     {
         unsafe { self.spawn_unchecked(future, schedule) }
     }
@@ -273,7 +411,7 @@ impl<M> Builder<M> {
         F: FnOnce(&M) -> Fut,
         Fut: Future + 'static,
         Fut::Output: 'static,
-        S: Fn(Runnable<M>) + Send + Sync + 'static,
+        S: Schedule<M> + Send + Sync + 'static,
     {
         use std::mem::ManuallyDrop;
         use std::pin::Pin;
@@ -370,7 +508,7 @@ impl<M> Builder<M> {
     where
         F: FnOnce(&'a M) -> Fut,
         Fut: Future + 'a,
-        S: Fn(Runnable<M>),
+        S: Schedule<M>,
         M: 'a,
     {
         // Allocate large futures on the heap.
@@ -432,7 +570,7 @@ pub fn spawn<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
-    S: Fn(Runnable) + Send + Sync + 'static,
+    S: Schedule + Send + Sync + 'static,
 {
     unsafe { spawn_unchecked(future, schedule) }
 }
@@ -474,7 +612,7 @@ pub fn spawn_local<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
 where
     F: Future + 'static,
     F::Output: 'static,
-    S: Fn(Runnable) + Send + Sync + 'static,
+    S: Schedule + Send + Sync + 'static,
 {
     Builder::new().spawn_local(move |()| future, schedule)
 }
@@ -511,7 +649,7 @@ where
 pub unsafe fn spawn_unchecked<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
 where
     F: Future,
-    S: Fn(Runnable),
+    S: Schedule,
 {
     Builder::new().spawn_unchecked(move |()| future, schedule)
 }
@@ -604,7 +742,7 @@ impl<M> Runnable<M> {
         mem::forget(self);
 
         unsafe {
-            ((*header).vtable.schedule)(ptr);
+            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
         }
     }
 

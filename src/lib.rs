@@ -92,7 +92,9 @@ mod state;
 mod task;
 mod utils;
 
-pub use crate::runnable::{spawn, spawn_unchecked, Builder, Runnable};
+pub use crate::runnable::{
+    spawn, spawn_unchecked, Builder, Runnable, Schedule, ScheduleInfo, WithInfo,
+};
 pub use crate::task::{FallibleTask, Task};
 
 #[cfg(feature = "std")]
