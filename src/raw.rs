@@ -280,12 +280,7 @@ where
                         // time to schedule it.
                         if state & RUNNING == 0 {
                             // Schedule the task.
-                            Self::schedule(
-                                ptr,
-                                ScheduleInfo {
-                                    woken_while_running: false,
-                                },
-                            );
+                            Self::schedule(ptr, ScheduleInfo::new(false));
                         } else {
                             // Drop the waker.
                             Self::drop_waker(ptr);
@@ -354,12 +349,7 @@ where
                                 ptr: NonNull::new_unchecked(ptr as *mut ()),
                                 _marker: PhantomData,
                             };
-                            (*raw.schedule).schedule(
-                                task,
-                                ScheduleInfo {
-                                    woken_while_running: false,
-                                },
-                            );
+                            (*raw.schedule).schedule(task, ScheduleInfo::new(false));
                         }
 
                         break;
@@ -407,12 +397,7 @@ where
                 (*raw.header)
                     .state
                     .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
-                Self::schedule(
-                    ptr,
-                    ScheduleInfo {
-                        woken_while_running: false,
-                    },
-                );
+                Self::schedule(ptr, ScheduleInfo::new(false));
             } else {
                 // Otherwise, destroy the task right away.
                 Self::destroy(ptr);
@@ -678,12 +663,7 @@ where
                             } else if state & SCHEDULED != 0 {
                                 // The thread that woke the task up didn't reschedule it because
                                 // it was running so now it's our responsibility to do so.
-                                Self::schedule(
-                                    ptr,
-                                    ScheduleInfo {
-                                        woken_while_running: true,
-                                    },
-                                );
+                                Self::schedule(ptr, ScheduleInfo::new(true));
                                 return true;
                             } else {
                                 // Drop the task reference.

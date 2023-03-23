@@ -39,18 +39,22 @@ impl<M: Default> Default for Builder<M> {
     }
 }
 
-/// Extra scheduling information that can be acquired by the scheduling
-/// function.
+/// Extra scheduling information that can be passed to the scheduling function.
 ///
-/// Note: The data source of this struct is directly from the actual
-/// implementation of the crate itself, different from [`Runnable`]'s metadata,
-/// which is managed by the caller.
+/// The data source of this struct is directly from the actual implementation
+/// of the crate itself, different from [`Runnable`]'s metadata, which is 
+/// managed by the caller.
 ///
 /// # Examples
 ///
 /// ```
 /// use async_task::{Runnable, ScheduleInfo, WithInfo};
 /// use std::sync::{Arc, Mutex};
+///
+/// // The future inside the task.
+/// let future = async {
+///     println!("Hello, world!");
+/// };
 ///
 /// // If the task gets woken up while running, it will be sent into this channel.
 /// let (s, r) = flume::unbounded();
@@ -69,6 +73,9 @@ impl<M: Default> Default for Builder<M> {
 ///
 /// // Create the actual scheduler to be spawned with some future.
 /// let scheduler = WithInfo(schedule);
+/// // Create a task with the future and the scheduler.
+/// let (runnable, task) = async_task::spawn(future, scheduler);
+/// ```
 #[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
 pub struct ScheduleInfo {
@@ -77,6 +84,14 @@ pub struct ScheduleInfo {
     /// It is set to true usually because the task has yielded itself to the
     /// scheduler.
     pub woken_while_running: bool,
+}
+
+impl ScheduleInfo {
+    pub(crate) fn new(woken_while_running: bool) -> Self {
+        ScheduleInfo {
+            woken_while_running,
+        }
+    }
 }
 
 /// The trait for scheduling functions.
@@ -102,7 +117,7 @@ where
 /// scheduler can thus use the information to determine its scheduling
 /// strategy.
 ///
-/// Note: The data source of [`ScheduleInfo`] is directly from the actual
+/// The data source of [`ScheduleInfo`] is directly from the actual
 /// implementation of the crate itself, different from [`Runnable`]'s metadata,
 /// which is managed by the caller.
 ///
@@ -721,12 +736,7 @@ impl<M> Runnable<M> {
         mem::forget(self);
 
         unsafe {
-            ((*header).vtable.schedule)(
-                ptr,
-                ScheduleInfo {
-                    woken_while_running: false,
-                },
-            );
+            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
         }
     }
 

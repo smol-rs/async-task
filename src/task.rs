@@ -211,12 +211,7 @@ impl<T, M> Task<T, M> {
                         // If the task is not scheduled nor running, schedule it one more time so
                         // that its future gets dropped by the executor.
                         if state & (SCHEDULED | RUNNING) == 0 {
-                            ((*header).vtable.schedule)(
-                                ptr,
-                                ScheduleInfo {
-                                    woken_while_running: false,
-                                },
-                            );
+                            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
                         }
 
                         // Notify the awaiter that the task has been closed.
@@ -295,12 +290,7 @@ impl<T, M> Task<T, M> {
                                 // schedule dropping its future or destroy it.
                                 if state & !(REFERENCE - 1) == 0 {
                                     if state & CLOSED == 0 {
-                                        ((*header).vtable.schedule)(
-                                            ptr,
-                                            ScheduleInfo {
-                                                woken_while_running: false,
-                                            },
-                                        );
+                                        ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
                                     } else {
                                         ((*header).vtable.destroy)(ptr);
                                     }
