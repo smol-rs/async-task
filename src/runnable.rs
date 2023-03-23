@@ -153,6 +153,12 @@ where
 #[derive(Debug)]
 pub struct WithInfo<F>(pub F);
 
+impl<F> From<F> for WithInfo<F> {
+    fn from(value: F) -> Self {
+        WithInfo(value)
+    }
+}
+
 impl<M, F> Schedule<M> for WithInfo<F>
 where
     F: Fn(Runnable<M>, ScheduleInfo),
