@@ -42,7 +42,7 @@ impl<M: Default> Default for Builder<M> {
 /// Extra scheduling information that can be passed to the scheduling function.
 ///
 /// The data source of this struct is directly from the actual implementation
-/// of the crate itself, different from [`Runnable`]'s metadata, which is 
+/// of the crate itself, different from [`Runnable`]'s metadata, which is
 /// managed by the caller.
 ///
 /// # Examples
