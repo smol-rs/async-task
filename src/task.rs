@@ -9,6 +9,7 @@ use core::task::{Context, Poll};
 
 use crate::header::Header;
 use crate::raw::Panic;
+use crate::runnable::ScheduleInfo;
 use crate::state::*;
 
 /// A spawned task.
@@ -210,7 +211,12 @@ impl<T, M> Task<T, M> {
                         // If the task is not scheduled nor running, schedule it one more time so
                         // that its future gets dropped by the executor.
                         if state & (SCHEDULED | RUNNING) == 0 {
-                            ((*header).vtable.schedule)(ptr, false);
+                            ((*header).vtable.schedule)(
+                                ptr,
+                                ScheduleInfo {
+                                    woken_while_running: false,
+                                },
+                            );
                         }
 
                         // Notify the awaiter that the task has been closed.
@@ -289,7 +295,12 @@ impl<T, M> Task<T, M> {
                                 // schedule dropping its future or destroy it.
                                 if state & !(REFERENCE - 1) == 0 {
                                     if state & CLOSED == 0 {
-                                        ((*header).vtable.schedule)(ptr, false);
+                                        ((*header).vtable.schedule)(
+                                            ptr,
+                                            ScheduleInfo {
+                                                woken_while_running: false,
+                                            },
+                                        );
                                     } else {
                                         ((*header).vtable.destroy)(ptr);
                                     }
