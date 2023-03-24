@@ -38,6 +38,14 @@ jobs:
         run: cargo test -- --test-threads=1
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all
+      - name: Clone async-executor
+        run: git clone https://github.com/smol-rs/async-executor.git
+      - name: Add patch section
+        run: |
+          echo '[patch.crates-io]' >> async-executor/Cargo.toml
+          echo 'async-task = { path = ".." }' >> async-executor/Cargo.toml
+      - name: Test async-executor
+        run: cargo test --manifest-path async-executor/Cargo.toml
 
   msrv:
     runs-on: ubuntu-latest
