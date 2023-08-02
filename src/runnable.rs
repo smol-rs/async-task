@@ -479,9 +479,10 @@ impl<M> Builder<M> {
     /// - If `Fut` is not [`Send`], its [`Runnable`] must be used and dropped on the original
     ///   thread.
     /// - If `Fut` is not `'static`, borrowed non-metadata variables must outlive its [`Runnable`].
-    /// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`] must be used and dropped on
-    ///   the original thread.
-    /// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the [`Runnable`]'s [`Waker`].
+    /// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
+    ///   must be used and dropped on the original thread.
+    /// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the
+    ///   [`Runnable`]'s [`Waker`].
     ///
     /// # Examples
     ///
@@ -627,9 +628,10 @@ where
 /// - If `future` is not [`Send`], its [`Runnable`] must be used and dropped on the original
 ///   thread.
 /// - If `future` is not `'static`, borrowed variables must outlive its [`Runnable`].
-/// - If `schedule` is not [`Send`] and [`Sync`], the task's [`Waker`] must be used and dropped on
-///   the original thread.
-/// - If `schedule` is not `'static`, borrowed variables must outlive the task's [`Waker`].
+/// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
+///   must be used and dropped on the original thread.
+/// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the
+///   [`Runnable`]'s [`Waker`].
 ///
 /// # Examples
 ///
