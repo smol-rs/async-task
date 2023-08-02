@@ -476,12 +476,12 @@ impl<M> Builder<M> {
     ///
     /// # Safety
     ///
-    /// - If `future`'s output is not [`Send`], its [`Runnable`] must be used and dropped on the original
+    /// - If `Fut` is not [`Send`], its [`Runnable`] must be used and dropped on the original
     ///   thread.
-    /// - If `future`'s output is not `'static`, borrowed variables must outlive its [`Runnable`].
-    /// - If `schedule` is not [`Send`] and [`Sync`], the task's [`Waker`] must be used and dropped on
+    /// - If `Fut` is not `'static`, borrowed non-metadata variables must outlive its [`Runnable`].
+    /// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`] must be used and dropped on
     ///   the original thread.
-    /// - If `schedule` is not `'static`, borrowed variables must outlive the task's [`Waker`].
+    /// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the [`Runnable`]'s [`Waker`].
     ///
     /// # Examples
     ///
