@@ -56,7 +56,7 @@ impl<'a, F: Future> Future for MeasureRuntime<'a, F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let duration_cell: &Cell<Duration> = *this.duration;
+        let duration_cell: &Cell<Duration> = this.duration;
         let start = Instant::now();
         let res = F::poll(this.f, cx);
         let new_duration = Instant::now() - start;
