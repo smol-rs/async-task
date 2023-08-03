@@ -14,9 +14,15 @@ use smol::{channel, future};
 
 struct ByDuration(Runnable<DurationMetadata>);
 
+impl ByDuration {
+    fn duration(&self) -> Duration {
+        self.0.metadata().inner.get()
+    }
+}
+
 impl PartialEq for ByDuration {
     fn eq(&self, other: &Self) -> bool {
-        self.0.metadata().inner.get() == other.0.metadata().inner.get()
+        self.duration() == other.duration()
     }
 }
 
@@ -24,23 +30,15 @@ impl Eq for ByDuration {}
 
 impl PartialOrd for ByDuration {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0
-            .metadata()
-            .inner
-            .get()
-            .partial_cmp(&other.0.metadata().inner.get())
+        self.duration()
+            .partial_cmp(&other.duration())
             .map(|ord| ord.reverse())
     }
 }
 
 impl Ord for ByDuration {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0
-            .metadata()
-            .inner
-            .get()
-            .cmp(&other.0.metadata().inner.get())
-            .reverse()
+        self.duration().cmp(&other.duration()).reverse()
     }
 }
 
