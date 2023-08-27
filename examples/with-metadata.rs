@@ -122,7 +122,10 @@ where
 {
     let task = spawn(future);
     while !task.is_finished() {
-        let Some(runnable) = QUEUE.with(|queue| queue.borrow_mut().pop()) else { thread::yield_now(); continue };
+        let Some(runnable) = QUEUE.with(|queue| queue.borrow_mut().pop()) else {
+            thread::yield_now();
+            continue;
+        };
         runnable.0.run();
     }
 }
