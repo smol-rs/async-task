@@ -1,3 +1,7 @@
+# Version 4.4.1
+
+- Clarify safety documentation for `spawn_unchecked`. (#49)
+
 # Version 4.4.0
 
 - Ensure that the allocation doesn't exceed `isize::MAX` (#32)
