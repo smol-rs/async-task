@@ -1,6 +1,6 @@
 use core::fmt;
 use core::future::Future;
-use core::marker::{PhantomData, Unpin};
+use core::marker::PhantomData;
 use core::mem;
 use core::pin::Pin;
 use core::ptr::NonNull;
