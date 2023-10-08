@@ -30,9 +30,7 @@ impl Eq for ByDuration {}
 
 impl PartialOrd for ByDuration {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.duration()
-            .partial_cmp(&other.duration())
-            .map(|ord| ord.reverse())
+        Some(self.cmp(other))
     }
 }
 
