@@ -5,8 +5,13 @@ use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop};
 use core::pin::Pin;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+#[cfg(not(feature = "portable-atomic"))]
+use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::Ordering;
+#[cfg(feature = "portable-atomic")]
+use portable_atomic::AtomicUsize;
 
 use crate::header::Header;
 use crate::runnable::{Schedule, ScheduleInfo};

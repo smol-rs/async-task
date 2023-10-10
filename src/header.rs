@@ -1,7 +1,12 @@
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::Waker;
+
+#[cfg(not(feature = "portable-atomic"))]
+use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::Ordering;
+#[cfg(feature = "portable-atomic")]
+use portable_atomic::AtomicUsize;
 
 use crate::raw::TaskVTable;
 use crate::state::*;
