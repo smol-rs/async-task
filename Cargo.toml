@@ -18,6 +18,10 @@ exclude = ["/.*"]
 default = ["std"]
 std = []
 
+[dependencies]
+# Uses portable-atomic polyfill atomics on targets without them
+portable-atomic = { version = "1", optional = true, default-features = false }
+
 [dev-dependencies]
 atomic-waker = "1"
 easy-parallel = "3"
