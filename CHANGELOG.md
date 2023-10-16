@@ -1,3 +1,7 @@
+# Version 4.5.0
+
+- Add a `portable-atomic` feature that enables the usage of fallback primitives for CPUs without atomics. (#58)
+
 # Version 4.4.1
 
 - Clarify safety documentation for `spawn_unchecked`. (#49)
