@@ -118,9 +118,8 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
 
         // Compute the layout for `Header` followed `S` and `union { F, T }`.
         let layout = layout_header;
-        let (layout, offset_s) = leap_unwrap!(layout.extend(layout_s), (Layout::new::<()>(), 0));
-        let (layout, offset_union) =
-            leap_unwrap!(layout.extend(layout_union), (Layout::new::<()>(), 0));
+        let (layout, offset_s) = leap_unwrap!(layout.extend(layout_s));
+        let (layout, offset_union) = leap_unwrap!(layout.extend(layout_union));
         let offset_f = offset_union;
         let offset_r = offset_union;
 

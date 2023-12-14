@@ -91,12 +91,11 @@ macro_rules! leap {
     }};
 }
 
-/// This is a poor man's `unwrap`. It takes additional $default_value argument which should match contents of $x type-wise.
 macro_rules! leap_unwrap {
-    ($x: expr, $default_value: expr) => {{
+    ($x: expr) => {{
         match ($x) {
             Some(val) => val,
-            None => ($default_value, $crate::utils::abort_compilation()).0,
+            None => panic!("called `Option::unwrap()` on a `None` value"),
         }
     }};
 }
