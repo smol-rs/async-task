@@ -125,3 +125,11 @@ pub(crate) const fn max(left: usize, right: usize) -> usize {
         right
     }
 }
+
+/// When invoked in const context, this function panics in order to abort compilation.
+/// It should preferably be replaced with panic!() when MSRV is sufficiently high (1.57).
+pub(crate) const fn abort_compilation() {
+    #![allow(unconditional_panic)]
+    let async_task_failed_to_compile: [(); 0] = [];
+    async_task_failed_to_compile[1]
+}
