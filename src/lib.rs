@@ -91,6 +91,15 @@ macro_rules! leap {
     }};
 }
 
+macro_rules! leap_unwrap {
+    ($x: expr) => {{
+        match ($x) {
+            Some(val) => val,
+            None => panic!("called `Option::unwrap()` on a `None` value"),
+        }
+    }};
+}
+
 mod header;
 mod raw;
 mod runnable;
