@@ -820,6 +820,25 @@ impl<M> Runnable<M> {
     fn header(&self) -> &Header<M> {
         unsafe { &*(self.ptr.as_ptr() as *const Header<M>) }
     }
+
+    /// Converts this task into a raw pointer.
+    pub fn into_raw(self) -> NonNull<()> {
+        let ptr = self.ptr;
+        mem::forget(self);
+        ptr
+    }
+
+    /// Converts a raw pointer into a task.
+    ///
+    /// This method should only be used with raw pointers returned from [`into_raw`].
+    ///
+    /// [`into_raw`]: #method.into_raw
+    pub unsafe fn from_raw(ptr: NonNull<()>) -> Self {
+        Self {
+            ptr,
+            _marker: Default::default(),
+        }
+    }
 }
 
 impl<M> Drop for Runnable<M> {

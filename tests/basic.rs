@@ -297,3 +297,12 @@ fn waker() {
     waker.wake();
     r.recv().unwrap();
 }
+
+#[test]
+fn raw() {
+    let (runnable, _handle) = async_task::spawn(async {}, |_| panic!());
+
+    let a = runnable.into_raw();
+    let task = unsafe { Runnable::<()>::from_raw(a) };
+    task.run();
+}
