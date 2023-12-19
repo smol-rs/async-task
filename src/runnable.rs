@@ -830,6 +830,7 @@ impl<M> Runnable<M> {
 
     /// Converts a raw pointer into a task.
     ///
+    /// # Safety
     /// This method should only be used with raw pointers returned from [`into_raw`].
     ///
     /// [`into_raw`]: #method.into_raw
