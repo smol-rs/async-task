@@ -865,6 +865,7 @@ impl<M> Runnable<M> {
     /// after the [`Task`] associated with a given Runnable has been dropped or cancelled.
     ///
     /// The state of the [`Runnable`] created with `from_raw` is not specified.
+    ///
     /// # Examples
     ///
     /// ```rust
