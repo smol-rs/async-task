@@ -311,7 +311,7 @@ fn raw() {
         task.run();
     }
 
-    let mut task_got_executed = Arc::new(AtomicBool::new(false));
+    let task_got_executed = Arc::new(AtomicBool::new(false));
     let (runnable, _handle) = async_task::spawn(
         {
             let task_got_executed = task_got_executed.clone();
