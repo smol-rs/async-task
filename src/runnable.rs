@@ -524,10 +524,7 @@ impl<M> Builder<M> {
             RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, self)
         };
 
-        let runnable = Runnable {
-            ptr,
-            _marker: PhantomData,
-        };
+        let runnable = Runnable::from_raw(ptr);
         let task = Task {
             ptr,
             _marker: PhantomData,
