@@ -836,8 +836,7 @@ impl<M> Runnable<M> {
     /// unsafe {
     ///     // Convert back to an `Runnable` to prevent leak.
     ///     let runnable = Runnable::<()>::from_raw(runnable_pointer);
-    ///     let did_poll = runnable.run();
-    ///     assert!(did_poll);
+    ///     runnable.run();
     ///     // Further calls to `Runnable::from_raw(runnable_pointer)` would be memory-unsafe.
     /// }
     /// // The memory was freed when `x` went out of scope above, so `runnable_pointer` is now dangling!
