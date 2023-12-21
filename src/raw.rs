@@ -1,7 +1,6 @@
 use alloc::alloc::Layout as StdLayout;
 use core::cell::UnsafeCell;
 use core::future::Future;
-use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop};
 use core::pin::Pin;
 use core::ptr::NonNull;
@@ -346,10 +345,7 @@ where
                             // Schedule the task. There is no need to call `Self::schedule(ptr)`
                             // because the schedule function cannot be destroyed while the waker is
                             // still alive.
-                            let task = Runnable {
-                                ptr: NonNull::new_unchecked(ptr as *mut ()),
-                                _marker: PhantomData,
-                            };
+                            let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
                             (*raw.schedule).schedule(task, ScheduleInfo::new(false));
                         }
 
@@ -438,10 +434,7 @@ where
             _waker = Waker::from_raw(Self::clone_waker(ptr));
         }
 
-        let task = Runnable {
-            ptr: NonNull::new_unchecked(ptr as *mut ()),
-            _marker: PhantomData,
-        };
+        let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
         (*raw.schedule).schedule(task, info);
     }
 

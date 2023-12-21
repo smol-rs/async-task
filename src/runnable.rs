@@ -524,10 +524,7 @@ impl<M> Builder<M> {
             RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, self)
         };
 
-        let runnable = Runnable {
-            ptr,
-            _marker: PhantomData,
-        };
+        let runnable = Runnable::from_raw(ptr);
         let task = Task {
             ptr,
             _marker: PhantomData,
@@ -819,6 +816,77 @@ impl<M> Runnable<M> {
 
     fn header(&self) -> &Header<M> {
         unsafe { &*(self.ptr.as_ptr() as *const Header<M>) }
+    }
+
+    /// Converts this task into a raw pointer.
+    ///
+    /// To avoid a memory leak the pointer must be converted back to a Runnable using [`Runnable<M>::from_raw`][from_raw].
+    ///
+    /// `into_raw` does not change the state of the [`Task`], but there is no guarantee that it will be in the same state after calling [`Runnable<M>::from_raw`][from_raw],
+    /// as the corresponding [`Task`] might have been dropped or cancelled.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use async_task::{Runnable, spawn};
+
+    /// let (runnable, task) = spawn(async {}, |_| {});
+    /// let runnable_pointer = runnable.into_raw();
+    ///
+    /// unsafe {
+    ///     // Convert back to an `Runnable` to prevent leak.
+    ///     let runnable = Runnable::<()>::from_raw(runnable_pointer);
+    ///     runnable.run();
+    ///     // Further calls to `Runnable::from_raw(runnable_pointer)` would be memory-unsafe.
+    /// }
+    /// // The memory was freed when `x` went out of scope above, so `runnable_pointer` is now dangling!
+    /// ```
+    /// [from_raw]: #method.from_raw
+    pub fn into_raw(self) -> NonNull<()> {
+        let ptr = self.ptr;
+        mem::forget(self);
+        ptr
+    }
+
+    /// Converts a raw pointer into a Runnable.
+    ///
+    /// # Safety
+    ///
+    /// This method should only be used with raw pointers returned from [`Runnable<M>::into_raw`][into_raw].
+    /// It is not safe to use the provided pointer once it is passed to `from_raw`.
+    /// Crucially, it is unsafe to call `from_raw` multiple times with the same pointer - even if the resulting [`Runnable`] is not used -
+    /// as internally `async-task` uses reference counting.
+    ///
+    /// It is however safe to call [`Runnable<M>::into_raw`][into_raw] on a [`Runnable`] created with `from_raw` or
+    /// after the [`Task`] associated with a given Runnable has been dropped or cancelled.
+    ///
+    /// The state of the [`Runnable`] created with `from_raw` is not specified.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use async_task::{Runnable, spawn};
+
+    /// let (runnable, task) = spawn(async {}, |_| {});
+    /// let runnable_pointer = runnable.into_raw();
+    ///
+    /// drop(task);
+    /// unsafe {
+    ///     // Convert back to an `Runnable` to prevent leak.
+    ///     let runnable = Runnable::<()>::from_raw(runnable_pointer);
+    ///     let did_poll = runnable.run();
+    ///     assert!(!did_poll);
+    ///     // Further calls to `Runnable::from_raw(runnable_pointer)` would be memory-unsafe.
+    /// }
+    /// // The memory was freed when `x` went out of scope above, so `runnable_pointer` is now dangling!
+    /// ```
+
+    /// [into_raw]: #method.into_raw
+    pub unsafe fn from_raw(ptr: NonNull<()>) -> Self {
+        Self {
+            ptr,
+            _marker: Default::default(),
+        }
     }
 }
 

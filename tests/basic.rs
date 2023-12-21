@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_task::Runnable;
@@ -296,4 +298,28 @@ fn waker() {
     runnable.run();
     waker.wake();
     r.recv().unwrap();
+}
+
+#[test]
+fn raw() {
+    // Dispatch schedules a function for execution at a later point. For tests, we execute it straight away.
+    fn dispatch(trampoline: extern "C" fn(NonNull<()>), context: NonNull<()>) {
+        trampoline(context)
+    }
+    extern "C" fn trampoline(runnable: NonNull<()>) {
+        let task = unsafe { Runnable::<()>::from_raw(runnable) };
+        task.run();
+    }
+
+    let task_got_executed = Arc::new(AtomicBool::new(false));
+    let (runnable, _handle) = async_task::spawn(
+        {
+            let task_got_executed = task_got_executed.clone();
+            async move { task_got_executed.store(true, Ordering::SeqCst) }
+        },
+        |runnable: Runnable<()>| dispatch(trampoline, runnable.into_raw()),
+    );
+    runnable.schedule();
+
+    assert!(task_got_executed.load(Ordering::SeqCst));
 }
