@@ -1,3 +1,8 @@
+# Version 4.7.0
+
+- Add `from_raw` and `into_raw` functions for `Runnable` to ease passing it
+  across an FFI boundary. (#65)
+
 # Version 4.6.0
 
 - Bump MSRV to 1.57. (#63)
