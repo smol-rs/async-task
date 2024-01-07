@@ -23,7 +23,7 @@ macro_rules! future {
         static $drop: AtomicUsize = AtomicUsize::new(0);
 
         let $name = {
-            struct Fut(Box<i32>);
+            struct Fut(#[allow(dead_code)] Box<i32>);
 
             impl Future for Fut {
                 type Output = ();
@@ -59,7 +59,7 @@ macro_rules! schedule {
         static $sched: AtomicUsize = AtomicUsize::new(0);
 
         let $name = {
-            struct Guard(Box<i32>);
+            struct Guard(#[allow(dead_code)] Box<i32>);
 
             impl Drop for Guard {
                 fn drop(&mut self) {
