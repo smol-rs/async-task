@@ -26,7 +26,7 @@ macro_rules! future {
         static WAKER: AtomicWaker = AtomicWaker::new();
 
         let ($name, $get_waker) = {
-            struct Fut(Box<i32>);
+            struct Fut(#[allow(dead_code)] Box<i32>);
 
             impl Future for Fut {
                 type Output = ();
@@ -67,7 +67,7 @@ macro_rules! schedule {
         let ($name, $chan) = {
             let (s, r) = flume::unbounded();
 
-            struct Guard(Box<i32>);
+            struct Guard(#[allow(dead_code)] Box<i32>);
 
             impl Drop for Guard {
                 fn drop(&mut self) {
