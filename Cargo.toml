@@ -5,7 +5,7 @@ name = "async-task"
 # - Create "v4.x.y" git tag
 version = "4.7.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
-edition = "2018"
+edition = "2021"
 rust-version = "1.57"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/async-task"
