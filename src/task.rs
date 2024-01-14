@@ -67,6 +67,8 @@ impl<T, M> std::panic::RefUnwindSafe for Task<T, M> {}
 impl<T, M> Task<T, M> {
     /// Detaches the task to let it keep running in the background.
     ///
+    /// The task's future's `drop()` is never run.
+    ///
     /// # Examples
     ///
     /// ```
@@ -478,6 +480,8 @@ pub struct FallibleTask<T, M = ()> {
 
 impl<T, M> FallibleTask<T, M> {
     /// Detaches the task to let it keep running in the background.
+    ///
+    /// The task's future's `drop()` is never run.
     ///
     /// # Examples
     ///
