@@ -67,7 +67,7 @@
 //! vanishes and only reappears when its [`Waker`][`core::task::Waker`] wakes the task, thus
 //! scheduling it to be run again.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![doc(test(attr(deny(rust_2018_idioms, warnings))))]
 #![doc(test(attr(allow(unused_extern_crates, unused_variables))))]
@@ -79,6 +79,8 @@
 )]
 
 extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
 
 /// We can't use `?` in const contexts yet, so this macro acts
 /// as a workaround.
