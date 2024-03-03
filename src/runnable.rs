@@ -420,7 +420,7 @@ impl<M> Builder<M> {
 
         #[inline]
         fn thread_id() -> ThreadId {
-            thread_local! {
+            std::thread_local! {
                 static ID: ThreadId = thread::current().id();
             }
             ID.try_with(|id| *id)
