@@ -449,7 +449,7 @@ impl<T, M> Future for Task<T, M> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.poll_task(cx) {
-            Poll::Ready(t) => Poll::Ready(t.expect("task has failed")),
+            Poll::Ready(t) => Poll::Ready(t.expect("Task polled after completion")),
             Poll::Pending => Poll::Pending,
         }
     }
