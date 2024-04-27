@@ -1,3 +1,7 @@
+# Version 4.7.1
+
+- Improve the panic message for when a task is polled after completion. (#73)
+
 # Version 4.7.0
 
 - Add `from_raw` and `into_raw` functions for `Runnable` to ease passing it
