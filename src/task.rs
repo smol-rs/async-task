@@ -392,6 +392,7 @@ impl<T, M> Task<T, M> {
                         // Propagate the panic if the task panicked.
                         let output = match output {
                             Ok(output) => output,
+                            #[allow(unreachable_patterns)]
                             Err(panic) => {
                                 #[cfg(feature = "std")]
                                 std::panic::resume_unwind(panic);
