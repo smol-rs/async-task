@@ -75,7 +75,7 @@ impl<T, M> Task<T, M> {
     ///
     /// let ex = Executor::new();
     ///
-    /// // Spawn a deamon future.
+    /// // Spawn a daemon future.
     /// ex.spawn(async {
     ///     loop {
     ///         println!("I'm a daemon task looping forever.");
@@ -108,7 +108,7 @@ impl<T, M> Task<T, M> {
     ///
     /// let ex = Executor::new();
     ///
-    /// // Spawn a deamon future.
+    /// // Spawn a daemon future.
     /// let task = ex.spawn(async {
     ///     loop {
     ///         println!("Even though I'm in an infinite loop, you can still cancel me!");
@@ -488,7 +488,7 @@ impl<T, M> FallibleTask<T, M> {
     ///
     /// let ex = Executor::new();
     ///
-    /// // Spawn a deamon future.
+    /// // Spawn a daemon future.
     /// ex.spawn(async {
     ///     loop {
     ///         println!("I'm a daemon task looping forever.");
@@ -520,7 +520,7 @@ impl<T, M> FallibleTask<T, M> {
     ///
     /// let ex = Executor::new();
     ///
-    /// // Spawn a deamon future.
+    /// // Spawn a daemon future.
     /// let task = ex.spawn(async {
     ///     loop {
     ///         println!("Even though I'm in an infinite loop, you can still cancel me!");
