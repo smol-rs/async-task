@@ -62,8 +62,10 @@ impl<M> Header<M> {
         let state = self.state.fetch_or(NOTIFYING, Ordering::AcqRel);
 
         // If the task was not notifying or registering an awaiter...
+        // Note: The NOTIFYING and REGISTERING bits act as locks on the awaiter UnsafeCell.
         if state & (NOTIFYING | REGISTERING) == 0 {
             // Take the waker out.
+            // SAFETY: self.awaiter is tied to atomic ordering operations on self.state.
             let waker = unsafe { (*self.awaiter.get()).take() };
 
             // Unset the bit indicating that the task is notifying its awaiter.
@@ -92,9 +94,10 @@ impl<M> Header<M> {
         let mut state = self.state.fetch_or(0, Ordering::Acquire);
 
         loop {
-            // There can't be two concurrent registrations because `Task` can only be polled
-            // by a unique pinned reference.
-            debug_assert!(state & REGISTERING == 0);
+            // There can't be two concurrent registrations because `Task` can only be polled by a
+            // unique pinned reference. Enforcing this here instead of marking the whole function
+            // unsafe.
+            assert!(state & REGISTERING == 0);
 
             // If we're in the notifying state at this moment, just wake and return without
             // registering.
@@ -119,6 +122,8 @@ impl<M> Header<M> {
         }
 
         // Put the waker into the awaiter field.
+        // SAFETY: We have OR'd the state of the header with REGISTERING so we have a lock on
+        // self.awaiter and can write to it.
         unsafe {
             abort_on_panic(|| (*self.awaiter.get()) = Some(waker.clone()));
         }
@@ -130,6 +135,12 @@ impl<M> Header<M> {
         loop {
             // If there was a notification, take the waker out of the awaiter field.
             if state & NOTIFYING != 0 {
+                // SAFETY: We have guaranteed that self.state is or'd with NOTIFYING, which
+                // prevents everyone else from writing to self.awaiter. So we know that we won't
+                // race with any writes from other threads.
+                // We can't reach this branch on the first loop through, but we can if someone
+                // notifies the task while we are in the middle of registering. Normally, they
+                // would also take a waker, but they won't if we have the NOTIFYING bit set.
                 if let Some(w) = unsafe { (*self.awaiter.get()).take() } {
                     abort_on_panic(|| waker = Some(w));
                 }
