@@ -829,7 +829,7 @@ impl<M> Runnable<M> {
     ///
     /// ```rust
     /// use async_task::{Runnable, spawn};
-
+    ///
     /// let (runnable, task) = spawn(async {}, |_| {});
     /// let runnable_pointer = runnable.into_raw();
     ///
@@ -866,7 +866,7 @@ impl<M> Runnable<M> {
     ///
     /// ```rust
     /// use async_task::{Runnable, spawn};
-
+    ///
     /// let (runnable, task) = spawn(async {}, |_| {});
     /// let runnable_pointer = runnable.into_raw();
     ///
@@ -880,7 +880,7 @@ impl<M> Runnable<M> {
     /// }
     /// // The memory was freed when `x` went out of scope above, so `runnable_pointer` is now dangling!
     /// ```
-
+    ///
     /// [into_raw]: #method.into_raw
     pub unsafe fn from_raw(ptr: NonNull<()>) -> Self {
         Self {
