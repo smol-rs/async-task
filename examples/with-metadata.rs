@@ -49,7 +49,7 @@ pin_project! {
     }
 }
 
-impl<'a, F: Future> Future for MeasureRuntime<'a, F> {
+impl<F: Future> Future for MeasureRuntime<'_, F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
