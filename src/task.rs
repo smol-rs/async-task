@@ -184,6 +184,9 @@ impl<T, M> Task<T, M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header<M>;
 
+        // TODO: This function claims that canceling a task will cause it to be scheduled so the
+        // executor can drop the future, but Runnable will drop the future in its own Drop, which
+        // should cause a race. This seems very bad.
         unsafe {
             let mut state = (*header).state.load(Ordering::Acquire);
 
@@ -323,6 +326,8 @@ impl<T, M> Task<T, M> {
         let header = ptr as *const Header<M>;
 
         unsafe {
+            // SAFETY: We only take the output if we're the ones who successfully set the CLOSED
+            // bit.
             let mut state = (*header).state.load(Ordering::Acquire);
 
             loop {
@@ -332,6 +337,8 @@ impl<T, M> Task<T, M> {
                     // dropped.
                     if state & (SCHEDULED | RUNNING) != 0 {
                         // Replace the waker with one associated with the current task.
+                        // NOTE: This assumes that REGISTERING is mutually-exclusive with CLOSED |
+                        // SCHEDULED | RUNNING.
                         (*header).register(cx.waker());
 
                         // Reload the state after registering. It is possible changes occurred just
@@ -413,6 +420,8 @@ impl<T, M> Task<T, M> {
     fn header(&self) -> &Header<M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header<M>;
+        // SAFETY: We're holding a refcount on our allocated task header, so it won't be dropped
+        // while we're alive.
         unsafe { &*header }
     }
 
@@ -423,6 +432,8 @@ impl<T, M> Task<T, M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header<M>;
 
+        // SAFETY: The only unsafe thing we're doing is dereferencing header, which is safe for the
+        // reason described above.
         unsafe {
             let state = (*header).state.load(Ordering::Acquire);
             state & (CLOSED | COMPLETED) != 0

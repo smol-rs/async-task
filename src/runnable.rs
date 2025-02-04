@@ -366,6 +366,7 @@ impl<M> Builder<M> {
         Fut::Output: Send + 'static,
         S: Schedule<M> + Send + Sync + 'static,
     {
+        // SAFETY: This is reasonable because of the Send trait and 'static lifetime.
         unsafe { self.spawn_unchecked(future, schedule) }
     }
 
@@ -438,6 +439,7 @@ impl<M> Builder<M> {
                     self.id == thread_id(),
                     "local task dropped by a thread that didn't spawn it"
                 );
+                // SAFETY: Drop is only called once per Checked, and Checked effectively owns F.
                 unsafe {
                     ManuallyDrop::drop(&mut self.inner);
                 }
@@ -452,6 +454,9 @@ impl<M> Builder<M> {
                     self.id == thread_id(),
                     "local task polled by a thread that didn't spawn it"
                 );
+                // SAFETY: The provided closure projects to a subfield, so the returned reference
+                // won't be movable as long as the original value is not movable. We're only
+                // passing this value to poll as pinned, so it won't get moved by us.
                 unsafe { self.map_unchecked_mut(|c| &mut *c.inner).poll(cx) }
             }
         }
@@ -466,6 +471,9 @@ impl<M> Builder<M> {
             }
         };
 
+        // SAFETY: We wrapped our future in a type that checks that we're on the correct thread
+        // before polling or dropping, so we'll panic if we ever go to poll or drop on the wrong
+        // thread instead of touching the given function which is !Send.
         unsafe { self.spawn_unchecked(future, schedule) }
     }
 
@@ -570,6 +578,8 @@ where
     F::Output: Send + 'static,
     S: Schedule + Send + Sync + 'static,
 {
+    // SAFETY: F, F::Output, and S are Send + 'static, and S is additionally Sync so we're
+    // upholding all of the requirements to call spawn_unchecked.
     unsafe { spawn_unchecked(future, schedule) }
 }
 
@@ -740,6 +750,14 @@ impl<M> Runnable<M> {
         let header = ptr as *const Header<M>;
         mem::forget(self);
 
+        // SAFETY: vtable.schedule is unsafe to call with the implied requirements that ptr is
+        // non-null, and points to a live task. The assumption here is that our task is not
+        // currently scheduled because schedule consumes self (so a previous scheduling would have
+        // moved the value). However, canceling a task from the task half of the task-runnable pair
+        // also schedules the task. That sets the task as CLOSED, but we're not checking the CLOSED
+        // bit in our header before sending this task to the scheduler. So it's really on the
+        // scheduler to make sure that the same task doesn't get scheduled twice. Is this actually
+        // upheld in practice?
         unsafe {
             ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
         }
@@ -778,6 +796,9 @@ impl<M> Runnable<M> {
         let header = ptr as *const Header<M>;
         mem::forget(self);
 
+        // SAFETY: Same as above, this API has mostly the same surface and is just a shim for the
+        // raw vtable behavior. This also has the same problem that run doesn't promise to check
+        // the header bits to avoid double-polling a cancelled task.
         unsafe { ((*header).vtable.run)(ptr) }
     }
 
@@ -808,6 +829,9 @@ impl<M> Runnable<M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header<M>;
 
+        // SAFETY: This is also a shim for calling the raw clone_waker function. Additionally, we
+        // need to know that the returned RawWaker obeys the contracts for Waker and WakerVTable,
+        // but that's all implicit unfortunately.
         unsafe {
             let raw_waker = ((*header).vtable.clone_waker)(ptr);
             Waker::from_raw(raw_waker)
@@ -815,6 +839,8 @@ impl<M> Runnable<M> {
     }
 
     fn header(&self) -> &Header<M> {
+        // SAFETY: As long as Runnable exists, we're guaranteed that the pointed-to task won't be
+        // dropped. The header of a live task is always safe to alias shared.
         unsafe { &*(self.ptr.as_ptr() as *const Header<M>) }
     }
 
@@ -938,6 +964,8 @@ impl<M: fmt::Debug> fmt::Debug for Runnable<M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const Header<M>;
 
+        // TODO: Call .header() instead. That's why the convenience function for this exists in the
+        // first place.
         f.debug_struct("Runnable")
             .field("header", unsafe { &(*header) })
             .finish()
