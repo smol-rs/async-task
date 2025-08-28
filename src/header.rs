@@ -12,7 +12,6 @@ use crate::raw::TaskVTable;
 use crate::state::*;
 use crate::utils::abort;
 use crate::utils::abort_on_panic;
-use crate::ScheduleInfo;
 
 pub(crate) enum Action {
     Schedule,
@@ -158,13 +157,12 @@ impl Header {
     }
 
     /// Clones a waker.
-    pub(crate) unsafe fn clone_waker(&self, vtable: &'static RawWakerVTable) -> RawWaker {
-        let ptr: *const Header = self;
-        let ptr: *const () = ptr.cast();
+    pub(crate) unsafe fn clone_waker(ptr: *const (), vtable: &'static RawWakerVTable) -> RawWaker {
+        let header = ptr as *const Header;
 
         // Increment the reference count. With any kind of reference-counted data structure,
         // relaxed ordering is appropriate when incrementing the counter.
-        let state = self.state.fetch_add(REFERENCE, Ordering::Relaxed);
+        let state = (*header).state.fetch_add(REFERENCE, Ordering::Relaxed);
 
         // If the reference count overflowed, abort.
         if state > isize::MAX as usize {
@@ -175,9 +173,11 @@ impl Header {
     }
 
     #[inline(never)]
-    pub(crate) unsafe fn drop_waker(&self) -> Option<Action> {
+    pub(crate) unsafe fn drop_waker(ptr: *const ()) -> Option<Action> {
+        let header = ptr as *const Header;
+
         // Decrement the reference count.
-        let new = self.state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
+        let new = (*header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
 
         // If this was the last reference to the task and the `Task` has been dropped too,
         // then we need to decide how to destroy the task.
@@ -185,7 +185,8 @@ impl Header {
             if new & (COMPLETED | CLOSED) == 0 {
                 // If the task was not completed nor closed, close it and schedule one more time so
                 // that its future gets dropped by the executor.
-                self.state
+                (*header)
+                    .state
                     .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
                 Some(Action::Schedule)
             } else {
@@ -196,136 +197,11 @@ impl Header {
             None
         }
     }
-
-    /// Puts the task in detached state.
-    #[inline(never)]
-    pub(crate) fn set_detached(&self) -> Option<*const ()> {
-        let ptr: *const Header = self;
-        let ptr: *const () = ptr.cast();
-
-        unsafe {
-            // A place where the output will be stored in case it needs to be dropped.
-            let mut output = None;
-
-            // Optimistically assume the `Task` is being detached just after creating the task.
-            // This is a common case so if the `Task` is datached, the overhead of it is only one
-            // compare-exchange operation.
-            if let Err(mut state) = self.state.compare_exchange_weak(
-                SCHEDULED | TASK | REFERENCE,
-                SCHEDULED | REFERENCE,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                loop {
-                    // If the task has been completed but not yet closed, that means its output
-                    // must be dropped.
-                    if state & COMPLETED != 0 && state & CLOSED == 0 {
-                        // Mark the task as closed in order to grab its output.
-                        match self.state.compare_exchange_weak(
-                            state,
-                            state | CLOSED,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // Read the output.
-                                output = Some(self.vtable.get_output(ptr));
-
-                                // Update the state variable because we're continuing the loop.
-                                state |= CLOSED;
-                            }
-                            Err(s) => state = s,
-                        }
-                    } else {
-                        // If this is the last reference to the task and it's not closed, then
-                        // close it and schedule one more time so that its future gets dropped by
-                        // the executor.
-                        let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
-                            SCHEDULED | CLOSED | REFERENCE
-                        } else {
-                            state & !TASK
-                        };
-
-                        // Unset the `TASK` flag.
-                        match self.state.compare_exchange_weak(
-                            state,
-                            new,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // If this is the last reference to the task, we need to either
-                                // schedule dropping its future or destroy it.
-                                if state & !(REFERENCE - 1) == 0 {
-                                    if state & CLOSED == 0 {
-                                        (self.vtable.schedule)(ptr, ScheduleInfo::new(false));
-                                    } else {
-                                        (self.vtable.destroy)(ptr);
-                                    }
-                                }
-
-                                break;
-                            }
-                            Err(s) => state = s,
-                        }
-                    }
-                }
-            }
-
-            output
-        }
-    }
-
-    /// Puts the task in canceled state.
-    #[inline(never)]
-    pub(crate) fn set_canceled(&self) {
-        let ptr: *const Header = self;
-        let ptr: *const () = ptr.cast();
-
-        unsafe {
-            let mut state = self.state.load(Ordering::Acquire);
-
-            loop {
-                // If the task has been completed or closed, it can't be canceled.
-                if state & (COMPLETED | CLOSED) != 0 {
-                    break;
-                }
-
-                // If the task is not scheduled nor running, we'll need to schedule it.
-                let new = if state & (SCHEDULED | RUNNING) == 0 {
-                    (state | SCHEDULED | CLOSED) + REFERENCE
-                } else {
-                    state | CLOSED
-                };
-
-                // Mark the task as closed.
-                match self.state.compare_exchange_weak(
-                    state,
-                    new,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // If the task is not scheduled nor running, schedule it one more time so
-                        // that its future gets dropped by the executor.
-                        if state & (SCHEDULED | RUNNING) == 0 {
-                            (self.vtable.schedule)(ptr, ScheduleInfo::new(false));
-                        }
-
-                        // Notify the awaiter that the task has been closed.
-                        if state & AWAITER != 0 {
-                            self.notify(None);
-                        }
-
-                        break;
-                    }
-                    Err(s) => state = s,
-                }
-            }
-        }
-    }
 }
 
+// SAFETY: repr(C) is explicitly used here so that casts between `Header` and `HeaderWithMetadata`
+// can be done safely without additional offsets.
+//
 /// The header of a task.
 ///
 /// This header is stored in memory at the beginning of the heap-allocated task.

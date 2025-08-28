@@ -743,7 +743,7 @@ impl<M> Runnable<M> {
         mem::forget(self);
 
         unsafe {
-            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
+            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false), (*header).vtable);
         }
     }
 
@@ -810,7 +810,7 @@ impl<M> Runnable<M> {
         let header = self.header();
 
         unsafe {
-            let raw_waker = header.clone_waker(header.vtable.raw_waker_vtable);
+            let raw_waker = Header::clone_waker(self.ptr.as_ptr(), header.vtable.raw_waker_vtable);
             Waker::from_raw(raw_waker)
         }
     }
@@ -922,7 +922,7 @@ impl<M> Drop for Runnable<M> {
             }
 
             // Drop the future.
-            (header.vtable.drop_future)(ptr, &*header.vtable.layout_info);
+            (header.vtable.drop_future)(ptr, header.vtable.layout_info);
 
             // Mark the task as unscheduled.
             let state = header.state.fetch_and(!SCHEDULED, Ordering::AcqRel);

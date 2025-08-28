@@ -29,13 +29,13 @@ pub(crate) struct TaskVTable {
     pub(crate) raw_waker_vtable: &'static RawWakerVTable,
 
     /// Schedules the task.
-    pub(crate) schedule: unsafe fn(*const (), ScheduleInfo),
+    pub(crate) schedule: unsafe fn(*const (), ScheduleInfo, &TaskVTable),
 
     /// Drops the future inside the task.
     pub(crate) drop_future: unsafe fn(*const (), &TaskLayout),
 
     /// Destroys the task.
-    pub(crate) destroy: unsafe fn(*const ()),
+    pub(crate) destroy: unsafe fn(*const (), &TaskLayout),
 
     /// Runs the task.
     pub(crate) run: unsafe fn(*const ()) -> bool,
@@ -148,7 +148,7 @@ where
     /// It is assumed that initially only the `Runnable` and the `Task` exist.
     pub(crate) fn allocate<'a, Gen: FnOnce(&'a M) -> F>(
         future: Gen,
-        schedule: S,
+        schedule_fn: S,
         builder: crate::Builder<M>,
     ) -> NonNull<()>
     where
@@ -180,9 +180,9 @@ where
                     awaiter: UnsafeCell::new(None),
                     vtable: &TaskVTable {
                         raw_waker_vtable: &Self::RAW_WAKER_VTABLE,
-                        schedule: Self::schedule,
+                        schedule: schedule::<S, M>,
                         drop_future: drop_future::<F>,
-                        destroy: Self::destroy,
+                        destroy: destroy::<S, M>,
                         run: Self::run,
                         layout_info: &Self::TASK_LAYOUT,
                     },
@@ -193,7 +193,7 @@ where
             });
 
             // Write the schedule function as the third field of the task.
-            (raw.schedule as *mut S).write(schedule);
+            (raw.schedule as *mut S).write(schedule_fn);
 
             // Generate the future, now that the metadata has been pinned in place.
             let future = abort_on_panic(|| future(&(*raw.header).metadata));
@@ -275,7 +275,7 @@ where
                         // time to schedule it.
                         if state & RUNNING == 0 {
                             // Schedule the task.
-                            Self::schedule(ptr, ScheduleInfo::new(false));
+                            schedule::<S, M>(ptr, ScheduleInfo::new(false), header.vtable);
                         } else {
                             // Drop the waker.
                             Self::drop_waker(ptr);
@@ -291,71 +291,12 @@ where
 
     /// Wakes a waker by reference.
     unsafe fn wake_by_ref(ptr: *const ()) {
-        let raw = Self::from_ptr(ptr);
-        let header = Self::header(ptr);
-
-        let mut state = header.state.load(Ordering::Acquire);
-
-        loop {
-            // If the task is completed or closed, it can't be woken up.
-            if state & (COMPLETED | CLOSED) != 0 {
-                break;
-            }
-
-            // If the task is already scheduled, we just need to synchronize with the thread that
-            // will run the task by "publishing" our current view of the memory.
-            if state & SCHEDULED != 0 {
-                // Update the state without actually modifying it.
-                match header.state.compare_exchange_weak(
-                    state,
-                    state,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => break,
-                    Err(s) => state = s,
-                }
-            } else {
-                // If the task is not running, we can schedule right away.
-                let new = if state & RUNNING == 0 {
-                    (state | SCHEDULED) + REFERENCE
-                } else {
-                    state | SCHEDULED
-                };
-
-                // Mark the task as scheduled.
-                match header.state.compare_exchange_weak(
-                    state,
-                    new,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // If the task is not running, now is the time to schedule.
-                        if state & RUNNING == 0 {
-                            // If the reference count overflowed, abort.
-                            if state > isize::MAX as usize {
-                                abort();
-                            }
-
-                            // Schedule the task. There is no need to call `Self::schedule(ptr)`
-                            // because the schedule function cannot be destroyed while the waker is
-                            // still alive.
-                            let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
-                            (*raw.schedule).schedule(task, ScheduleInfo::new(false));
-                        }
-
-                        break;
-                    }
-                    Err(s) => state = s,
-                }
-            }
-        }
+        wake_by_ref::<S, M>(ptr, &Self::TASK_LAYOUT);
     }
 
     /// Clones a waker.
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
-        Self::header(ptr).clone_waker(&Self::RAW_WAKER_VTABLE)
+        Header::clone_waker(ptr, &Self::RAW_WAKER_VTABLE)
     }
 
     /// Drops a waker.
@@ -365,51 +306,14 @@ where
     /// scheduled one more time so that its future gets dropped by the executor.
     #[inline]
     unsafe fn drop_waker(ptr: *const ()) {
-        match Self::header(ptr).drop_waker() {
-            Some(Action::Schedule) => Self::schedule(ptr, ScheduleInfo::new(false)),
-            Some(Action::Destroy) => Self::destroy(ptr),
+        let header = Self::header(ptr);
+        match Header::drop_waker(ptr) {
+            Some(Action::Schedule) => {
+                schedule::<S, M>(ptr, ScheduleInfo::new(false), header.vtable)
+            }
+            Some(Action::Destroy) => destroy::<S, M>(ptr, &Self::TASK_LAYOUT),
             None => {}
         }
-    }
-
-    /// Schedules a task for running.
-    ///
-    /// This function doesn't modify the state of the task. It only passes the task reference to
-    /// its schedule function.
-    unsafe fn schedule(ptr: *const (), info: ScheduleInfo) {
-        let raw = Self::from_ptr(ptr);
-        let header = Self::header(ptr);
-
-        // If the schedule function has captured variables, create a temporary waker that prevents
-        // the task from getting deallocated while the function is being invoked.
-        let _waker;
-        if mem::size_of::<S>() > 0 {
-            _waker = Waker::from_raw(header.clone_waker(&Self::RAW_WAKER_VTABLE));
-        }
-
-        let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
-        (*raw.schedule).schedule(task, info);
-    }
-
-    /// Cleans up task's resources and deallocates it.
-    ///
-    /// The schedule function will be dropped, and the task will then get deallocated.
-    /// The task must be closed before this function is called.
-    #[inline]
-    unsafe fn destroy(ptr: *const ()) {
-        let raw = Self::from_ptr(ptr);
-
-        // We need a safeguard against panics because destructors can panic.
-        abort_on_panic(|| {
-            // Drop the header along with the metadata.
-            (raw.header as *mut HeaderWithMetadata<M>).drop_in_place();
-
-            // Drop the schedule function.
-            (raw.schedule as *mut S).drop_in_place();
-        });
-
-        // Finally, deallocate the memory reserved by the task.
-        alloc::alloc::dealloc(ptr as *mut u8, Self::TASK_LAYOUT.layout);
     }
 
     /// Runs a task.
@@ -593,7 +497,7 @@ where
                             } else if state & SCHEDULED != 0 {
                                 // The thread that woke the task up didn't reschedule it because
                                 // it was running so now it's our responsibility to do so.
-                                Self::schedule(ptr, ScheduleInfo::new(true));
+                                schedule::<S, M>(ptr, ScheduleInfo::new(true), header.vtable);
                                 return true;
                             } else {
                                 // Drop the task reference.
@@ -693,6 +597,24 @@ where
     }
 }
 
+/// Schedules a task for running.
+///
+/// This function doesn't modify the state of the task. It only passes the task reference to
+/// its schedule function.
+unsafe fn schedule<S: Schedule<M>, M>(ptr: *const (), info: ScheduleInfo, vtable: &TaskVTable) {
+    let schedule = ptr.byte_add(vtable.layout_info.offset_s) as *mut S;
+
+    // If the schedule function has captured variables, create a temporary waker that prevents
+    // the task from getting deallocated while the function is being invoked.
+    let _waker;
+    if mem::size_of::<S>() > 0 {
+        _waker = Waker::from_raw(Header::clone_waker(ptr, vtable.raw_waker_vtable));
+    }
+
+    let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
+    (*schedule).schedule(task, info);
+}
+
 /// Drops the future inside a task.
 #[inline]
 unsafe fn drop_future<F>(ptr: *const (), task_layout: &TaskLayout) {
@@ -702,6 +624,93 @@ unsafe fn drop_future<F>(ptr: *const (), task_layout: &TaskLayout) {
     abort_on_panic(|| {
         future_ptr.drop_in_place();
     })
+}
+
+/// Wakes a waker by reference.
+unsafe fn wake_by_ref<S: Schedule<M>, M>(ptr: *const (), task_layout: &TaskLayout) {
+    let header = ptr as *const Header;
+    let header = &*header;
+
+    let mut state = header.state.load(Ordering::Acquire);
+
+    loop {
+        // If the task is completed or closed, it can't be woken up.
+        if state & (COMPLETED | CLOSED) != 0 {
+            break;
+        }
+
+        // If the task is already scheduled, we just need to synchronize with the thread that
+        // will run the task by "publishing" our current view of the memory.
+        if state & SCHEDULED != 0 {
+            // Update the state without actually modifying it.
+            match header.state.compare_exchange_weak(
+                state,
+                state,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(s) => state = s,
+            }
+        } else {
+            // If the task is not running, we can schedule right away.
+            let new = if state & RUNNING == 0 {
+                (state | SCHEDULED) + REFERENCE
+            } else {
+                state | SCHEDULED
+            };
+
+            // Mark the task as scheduled.
+            match header.state.compare_exchange_weak(
+                state,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    // If the task is not running, now is the time to schedule.
+                    if state & RUNNING == 0 {
+                        // If the reference count overflowed, abort.
+                        if state > isize::MAX as usize {
+                            abort();
+                        }
+
+                        let schedule = ptr.byte_add(task_layout.offset_s) as *mut S;
+
+                        // Schedule the task. There is no need to call `Self::schedule(ptr)`
+                        // because the schedule function cannot be destroyed while the waker is
+                        // still alive.
+                        let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
+                        (*schedule).schedule(task, ScheduleInfo::new(false));
+                    }
+
+                    break;
+                }
+                Err(s) => state = s,
+            }
+        }
+    }
+}
+
+/// Cleans up task's resources and deallocates it.
+///
+/// The schedule function will be dropped, and the task will then get deallocated.
+/// The task must be closed before this function is called.
+#[inline]
+unsafe fn destroy<S, M>(ptr: *const (), task_layout: &TaskLayout) {
+    let schedule = ptr.byte_add(task_layout.offset_s);
+
+    // We need a safeguard against panics because destructors can panic.
+    abort_on_panic(|| {
+        // Drop the header along with the metadata.
+        (ptr as *mut HeaderWithMetadata<M>).drop_in_place();
+
+        // Drop the schedule function.
+        (schedule as *mut S).drop_in_place();
+    });
+
+    // Finally, deallocate the memory reserved by the task.
+    alloc::alloc::dealloc(ptr as *mut u8, task_layout.layout);
 }
 
 /// Drops a task reference (`Runnable` or `Waker`).
@@ -719,6 +728,6 @@ pub(crate) unsafe fn drop_ref(ptr: *const ()) {
     // If this was the last reference to the task and the `Task` has been dropped too,
     // then destroy the task.
     if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
-        (header.vtable.destroy)(ptr);
+        (header.vtable.destroy)(ptr, header.vtable.layout_info);
     }
 }

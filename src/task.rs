@@ -10,6 +10,7 @@ use core::task::{Context, Poll};
 use crate::header::{Header, HeaderWithMetadata};
 use crate::raw::Panic;
 use crate::state::*;
+use crate::ScheduleInfo;
 
 /// A spawned task.
 ///
@@ -125,7 +126,7 @@ impl<T, M> Task<T, M> {
     /// ```
     pub async fn cancel(self) -> Option<T> {
         let this = self;
-        this.header().set_canceled();
+        set_canceled(this.ptr.as_ptr());
         this.fallible().await
     }
 
@@ -180,9 +181,90 @@ impl<T, M> Task<T, M> {
 
     /// Puts the task in detached state.
     fn set_detached(&mut self) -> Option<Result<T, Panic>> {
-        self.header()
-            .set_detached()
-            .map(|ptr| unsafe { (ptr as *mut Result<T, Panic>).read() })
+        let ptr = self.ptr.as_ptr();
+        let header = ptr as *const Header;
+
+        unsafe {
+            // A place where the output will be stored in case it needs to be dropped.
+            let mut output = None;
+
+            // Optimistically assume the `Task` is being detached just after creating the task.
+            // This is a common case so if the `Task` is datached, the overhead of it is only one
+            // compare-exchange operation.
+            if let Err(mut state) = (*header).state.compare_exchange_weak(
+                SCHEDULED | TASK | REFERENCE,
+                SCHEDULED | REFERENCE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                loop {
+                    // If the task has been completed but not yet closed, that means its output
+                    // must be dropped.
+                    if state & COMPLETED != 0 && state & CLOSED == 0 {
+                        // Mark the task as closed in order to grab its output.
+                        match (*header).state.compare_exchange_weak(
+                            state,
+                            state | CLOSED,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        ) {
+                            Ok(_) => {
+                                // Read the output.
+                                output = Some(
+                                    ((*header).vtable.get_output(ptr) as *mut Result<T, Panic>)
+                                        .read(),
+                                );
+
+                                // Update the state variable because we're continuing the loop.
+                                state |= CLOSED;
+                            }
+                            Err(s) => state = s,
+                        }
+                    } else {
+                        // If this is the last reference to the task and it's not closed, then
+                        // close it and schedule one more time so that its future gets dropped by
+                        // the executor.
+                        let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
+                            SCHEDULED | CLOSED | REFERENCE
+                        } else {
+                            state & !TASK
+                        };
+
+                        // Unset the `TASK` flag.
+                        match (*header).state.compare_exchange_weak(
+                            state,
+                            new,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        ) {
+                            Ok(_) => {
+                                // If this is the last reference to the task, we need to either
+                                // schedule dropping its future or destroy it.
+                                if state & !(REFERENCE - 1) == 0 {
+                                    if state & CLOSED == 0 {
+                                        ((*header).vtable.schedule)(
+                                            ptr,
+                                            ScheduleInfo::new(false),
+                                            (*header).vtable,
+                                        );
+                                    } else {
+                                        ((*header).vtable.destroy)(
+                                            ptr,
+                                            (*header).vtable.layout_info,
+                                        );
+                                    }
+                                }
+
+                                break;
+                            }
+                            Err(s) => state = s,
+                        }
+                    }
+                }
+            }
+
+            output
+        }
     }
 
     /// Polls the task to retrieve its output.
@@ -323,9 +405,61 @@ impl<T, M> Task<T, M> {
     }
 }
 
+/// Puts the task in canceled state.
+#[inline(never)]
+fn set_canceled(ptr: *const ()) {
+    let header = ptr as *const Header;
+
+    unsafe {
+        let mut state = (*header).state.load(Ordering::Acquire);
+
+        loop {
+            // If the task has been completed or closed, it can't be canceled.
+            if state & (COMPLETED | CLOSED) != 0 {
+                break;
+            }
+
+            // If the task is not scheduled nor running, we'll need to schedule it.
+            let new = if state & (SCHEDULED | RUNNING) == 0 {
+                (state | SCHEDULED | CLOSED) + REFERENCE
+            } else {
+                state | CLOSED
+            };
+
+            // Mark the task as closed.
+            match (*header).state.compare_exchange_weak(
+                state,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    // If the task is not scheduled nor running, schedule it one more time so
+                    // that its future gets dropped by the executor.
+                    if state & (SCHEDULED | RUNNING) == 0 {
+                        ((*header).vtable.schedule)(
+                            ptr,
+                            ScheduleInfo::new(false),
+                            (*header).vtable,
+                        );
+                    }
+
+                    // Notify the awaiter that the task has been closed.
+                    if state & AWAITER != 0 {
+                        (*header).notify(None);
+                    }
+
+                    break;
+                }
+                Err(s) => state = s,
+            }
+        }
+    }
+}
+
 impl<T, M> Drop for Task<T, M> {
     fn drop(&mut self) {
-        self.header().set_canceled();
+        set_canceled(self.ptr.as_ptr());
         self.set_detached();
     }
 }
