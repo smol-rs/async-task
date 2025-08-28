@@ -7,9 +7,8 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 use core::task::{Context, Poll};
 
-use crate::header::Header;
+use crate::header::{Header, HeaderWithMetadata};
 use crate::raw::Panic;
-use crate::runnable::ScheduleInfo;
 use crate::state::*;
 
 /// A spawned task.
@@ -125,8 +124,8 @@ impl<T, M> Task<T, M> {
     /// });
     /// ```
     pub async fn cancel(self) -> Option<T> {
-        let mut this = self;
-        this.set_canceled();
+        let this = self;
+        this.header().set_canceled();
         this.fallible().await
     }
 
@@ -179,133 +178,11 @@ impl<T, M> Task<T, M> {
         FallibleTask { task: self }
     }
 
-    /// Puts the task in canceled state.
-    fn set_canceled(&mut self) {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
-
-        unsafe {
-            let mut state = (*header).state.load(Ordering::Acquire);
-
-            loop {
-                // If the task has been completed or closed, it can't be canceled.
-                if state & (COMPLETED | CLOSED) != 0 {
-                    break;
-                }
-
-                // If the task is not scheduled nor running, we'll need to schedule it.
-                let new = if state & (SCHEDULED | RUNNING) == 0 {
-                    (state | SCHEDULED | CLOSED) + REFERENCE
-                } else {
-                    state | CLOSED
-                };
-
-                // Mark the task as closed.
-                match (*header).state.compare_exchange_weak(
-                    state,
-                    new,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // If the task is not scheduled nor running, schedule it one more time so
-                        // that its future gets dropped by the executor.
-                        if state & (SCHEDULED | RUNNING) == 0 {
-                            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
-                        }
-
-                        // Notify the awaiter that the task has been closed.
-                        if state & AWAITER != 0 {
-                            (*header).notify(None);
-                        }
-
-                        break;
-                    }
-                    Err(s) => state = s,
-                }
-            }
-        }
-    }
-
     /// Puts the task in detached state.
     fn set_detached(&mut self) -> Option<Result<T, Panic>> {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
-
-        unsafe {
-            // A place where the output will be stored in case it needs to be dropped.
-            let mut output = None;
-
-            // Optimistically assume the `Task` is being detached just after creating the task.
-            // This is a common case so if the `Task` is datached, the overhead of it is only one
-            // compare-exchange operation.
-            if let Err(mut state) = (*header).state.compare_exchange_weak(
-                SCHEDULED | TASK | REFERENCE,
-                SCHEDULED | REFERENCE,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                loop {
-                    // If the task has been completed but not yet closed, that means its output
-                    // must be dropped.
-                    if state & COMPLETED != 0 && state & CLOSED == 0 {
-                        // Mark the task as closed in order to grab its output.
-                        match (*header).state.compare_exchange_weak(
-                            state,
-                            state | CLOSED,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // Read the output.
-                                output = Some(
-                                    (((*header).vtable.get_output)(ptr) as *mut Result<T, Panic>)
-                                        .read(),
-                                );
-
-                                // Update the state variable because we're continuing the loop.
-                                state |= CLOSED;
-                            }
-                            Err(s) => state = s,
-                        }
-                    } else {
-                        // If this is the last reference to the task and it's not closed, then
-                        // close it and schedule one more time so that its future gets dropped by
-                        // the executor.
-                        let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
-                            SCHEDULED | CLOSED | REFERENCE
-                        } else {
-                            state & !TASK
-                        };
-
-                        // Unset the `TASK` flag.
-                        match (*header).state.compare_exchange_weak(
-                            state,
-                            new,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // If this is the last reference to the task, we need to either
-                                // schedule dropping its future or destroy it.
-                                if state & !(REFERENCE - 1) == 0 {
-                                    if state & CLOSED == 0 {
-                                        ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
-                                    } else {
-                                        ((*header).vtable.destroy)(ptr);
-                                    }
-                                }
-
-                                break;
-                            }
-                            Err(s) => state = s,
-                        }
-                    }
-                }
-            }
-
-            output
-        }
+        self.header()
+            .set_detached()
+            .map(|ptr| unsafe { (ptr as *mut Result<T, Panic>).read() })
     }
 
     /// Polls the task to retrieve its output.
@@ -320,7 +197,7 @@ impl<T, M> Task<T, M> {
     /// 4. It is completed and the `Task` gets dropped.
     fn poll_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
+        let header = ptr as *const Header;
 
         unsafe {
             let mut state = (*header).state.load(Ordering::Acquire);
@@ -386,7 +263,7 @@ impl<T, M> Task<T, M> {
                         }
 
                         // Take the output from the task.
-                        let output = ((*header).vtable.get_output)(ptr) as *mut Result<T, Panic>;
+                        let output = (*header).vtable.get_output(ptr) as *mut Result<T, Panic>;
                         let output = output.read();
 
                         // Propagate the panic if the task panicked.
@@ -410,9 +287,15 @@ impl<T, M> Task<T, M> {
         }
     }
 
-    fn header(&self) -> &Header<M> {
+    fn header(&self) -> &Header {
         let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
+        let header = ptr as *const Header;
+        unsafe { &*header }
+    }
+
+    fn header_with_metadata(&self) -> &HeaderWithMetadata<M> {
+        let ptr = self.ptr.as_ptr();
+        let header = ptr as *const HeaderWithMetadata<M>;
         unsafe { &*header }
     }
 
@@ -421,7 +304,7 @@ impl<T, M> Task<T, M> {
     /// Note that in a multithreaded environment, this task can change finish immediately after calling this function.
     pub fn is_finished(&self) -> bool {
         let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
+        let header = ptr as *const Header;
 
         unsafe {
             let state = (*header).state.load(Ordering::Acquire);
@@ -434,13 +317,15 @@ impl<T, M> Task<T, M> {
     /// Tasks can be created with a metadata object associated with them; by default, this
     /// is a `()` value. See the [`Builder::metadata()`] method for more information.
     pub fn metadata(&self) -> &M {
-        &self.header().metadata
+        let ptr = self.ptr.as_ptr();
+        let header = ptr as *const HeaderWithMetadata<M>;
+        &unsafe { &*header }.metadata
     }
 }
 
 impl<T, M> Drop for Task<T, M> {
     fn drop(&mut self) {
-        self.set_canceled();
+        self.header().set_canceled();
         self.set_detached();
     }
 }
@@ -459,7 +344,7 @@ impl<T, M> Future for Task<T, M> {
 impl<T, M: fmt::Debug> fmt::Debug for Task<T, M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
-            .field("header", self.header())
+            .field("header", self.header_with_metadata())
             .finish()
     }
 }
@@ -560,7 +445,7 @@ impl<T, M> Future for FallibleTask<T, M> {
 impl<T, M: fmt::Debug> fmt::Debug for FallibleTask<T, M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FallibleTask")
-            .field("header", self.task.header())
+            .field("header", self.task.header_with_metadata())
             .finish()
     }
 }

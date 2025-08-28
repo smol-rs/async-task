@@ -12,7 +12,7 @@ use core::sync::atomic::Ordering;
 #[cfg(feature = "portable-atomic")]
 use portable_atomic::AtomicUsize;
 
-use crate::header::Header;
+use crate::header::{Action, Header, HeaderWithMetadata};
 use crate::runnable::{Schedule, ScheduleInfo};
 use crate::state::*;
 use crate::utils::{abort, abort_on_panic, max, Layout};
@@ -26,17 +26,13 @@ pub(crate) type Panic = core::convert::Infallible;
 
 /// The vtable for a task.
 pub(crate) struct TaskVTable {
+    pub(crate) raw_waker_vtable: &'static RawWakerVTable,
+
     /// Schedules the task.
     pub(crate) schedule: unsafe fn(*const (), ScheduleInfo),
 
     /// Drops the future inside the task.
-    pub(crate) drop_future: unsafe fn(*const ()),
-
-    /// Returns a pointer to the output stored after completion.
-    pub(crate) get_output: unsafe fn(*const ()) -> *const (),
-
-    /// Drops the task reference (`Runnable` or `Waker`).
-    pub(crate) drop_ref: unsafe fn(ptr: *const ()),
+    pub(crate) drop_future: unsafe fn(*const (), &TaskLayout),
 
     /// Destroys the task.
     pub(crate) destroy: unsafe fn(*const ()),
@@ -44,14 +40,18 @@ pub(crate) struct TaskVTable {
     /// Runs the task.
     pub(crate) run: unsafe fn(*const ()) -> bool,
 
-    /// Creates a new waker associated with the task.
-    pub(crate) clone_waker: unsafe fn(ptr: *const ()) -> RawWaker,
-
     /// The memory layout of the task. This information enables
     /// debuggers to decode raw task memory blobs. Do not remove
     /// the field, even if it appears to be unused.
     #[allow(unused)]
     pub(crate) layout_info: &'static TaskLayout,
+}
+
+impl TaskVTable {
+    /// Returns a pointer to the output inside a task.
+    pub(crate) unsafe fn get_output(&self, ptr: *const ()) -> *const () {
+        ptr.byte_add(self.layout_info.offset_r)
+    }
 }
 
 /// Memory layout of a task.
@@ -78,7 +78,7 @@ pub(crate) struct TaskLayout {
 /// Raw pointers to the fields inside a task.
 pub(crate) struct RawTask<F, T, S, M> {
     /// The task header.
-    pub(crate) header: *const Header<M>,
+    pub(crate) header: *const HeaderWithMetadata<M>,
 
     /// The schedule function.
     pub(crate) schedule: *const S,
@@ -105,7 +105,7 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
     #[inline]
     const fn eval_task_layout() -> TaskLayout {
         // Compute the layouts for `Header`, `S`, `F`, and `T`.
-        let layout_header = Layout::new::<Header<M>>();
+        let layout_header = Layout::new::<HeaderWithMetadata<M>>();
         let layout_s = Layout::new::<S>();
         let layout_f = Layout::new::<F>();
         let layout_r = Layout::new::<Result<T, Panic>>();
@@ -158,11 +158,9 @@ where
         // Compute the layout of the task for allocation. Abort if the computation fails.
         //
         // n.b. notgull: task_layout now automatically aborts instead of panicking
-        let task_layout = Self::task_layout();
-
         unsafe {
             // Allocate enough space for the entire task.
-            let ptr = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
+            let ptr = match NonNull::new(alloc::alloc::alloc(Self::TASK_LAYOUT.layout) as *mut ()) {
                 None => abort(),
                 Some(p) => p,
             };
@@ -176,22 +174,22 @@ where
             } = builder;
 
             // Write the header as the first field of the task.
-            (raw.header as *mut Header<M>).write(Header {
-                state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
-                awaiter: UnsafeCell::new(None),
-                vtable: &TaskVTable {
-                    schedule: Self::schedule,
-                    drop_future: Self::drop_future,
-                    get_output: Self::get_output,
-                    drop_ref: Self::drop_ref,
-                    destroy: Self::destroy,
-                    run: Self::run,
-                    clone_waker: Self::clone_waker,
-                    layout_info: &Self::TASK_LAYOUT,
+            (raw.header as *mut HeaderWithMetadata<M>).write(HeaderWithMetadata {
+                header: Header {
+                    state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
+                    awaiter: UnsafeCell::new(None),
+                    vtable: &TaskVTable {
+                        raw_waker_vtable: &Self::RAW_WAKER_VTABLE,
+                        schedule: Self::schedule,
+                        drop_future: drop_future::<F>,
+                        destroy: Self::destroy,
+                        run: Self::run,
+                        layout_info: &Self::TASK_LAYOUT,
+                    },
+                    #[cfg(feature = "std")]
+                    propagate_panic,
                 },
                 metadata,
-                #[cfg(feature = "std")]
-                propagate_panic,
             });
 
             // Write the schedule function as the third field of the task.
@@ -210,24 +208,21 @@ where
     /// Creates a `RawTask` from a raw task pointer.
     #[inline]
     pub(crate) fn from_ptr(ptr: *const ()) -> Self {
-        let task_layout = Self::task_layout();
-        let p = ptr as *const u8;
-
         unsafe {
             Self {
-                header: p as *const Header<M>,
-                schedule: p.add(task_layout.offset_s) as *const S,
-                future: p.add(task_layout.offset_f) as *mut F,
-                output: p.add(task_layout.offset_r) as *mut Result<T, Panic>,
+                header: ptr as *const HeaderWithMetadata<M>,
+                schedule: ptr.byte_add(Self::TASK_LAYOUT.offset_s) as *const S,
+                future: ptr.byte_add(Self::TASK_LAYOUT.offset_f) as *mut F,
+                output: ptr.byte_add(Self::TASK_LAYOUT.offset_r) as *mut Result<T, Panic>,
             }
         }
     }
 
-    /// Returns the layout of the task.
-    #[inline]
-    fn task_layout() -> TaskLayout {
-        Self::TASK_LAYOUT
+    fn header<'a>(ptr: *const ()) -> &'a Header {
+        let header = ptr as *const Header;
+        unsafe { &*header }
     }
+
     /// Wakes a waker.
     unsafe fn wake(ptr: *const ()) {
         // This is just an optimization. If the schedule function has captured variables, then
@@ -238,9 +233,9 @@ where
             return;
         }
 
-        let raw = Self::from_ptr(ptr);
+        let header = Self::header(ptr);
 
-        let mut state = (*raw.header).state.load(Ordering::Acquire);
+        let mut state = header.state.load(Ordering::Acquire);
 
         loop {
             // If the task is completed or closed, it can't be woken up.
@@ -254,7 +249,7 @@ where
             // will run the task by "publishing" our current view of the memory.
             if state & SCHEDULED != 0 {
                 // Update the state without actually modifying it.
-                match (*raw.header).state.compare_exchange_weak(
+                match header.state.compare_exchange_weak(
                     state,
                     state,
                     Ordering::AcqRel,
@@ -269,7 +264,7 @@ where
                 }
             } else {
                 // Mark the task as scheduled.
-                match (*raw.header).state.compare_exchange_weak(
+                match header.state.compare_exchange_weak(
                     state,
                     state | SCHEDULED,
                     Ordering::AcqRel,
@@ -297,8 +292,9 @@ where
     /// Wakes a waker by reference.
     unsafe fn wake_by_ref(ptr: *const ()) {
         let raw = Self::from_ptr(ptr);
+        let header = Self::header(ptr);
 
-        let mut state = (*raw.header).state.load(Ordering::Acquire);
+        let mut state = header.state.load(Ordering::Acquire);
 
         loop {
             // If the task is completed or closed, it can't be woken up.
@@ -310,7 +306,7 @@ where
             // will run the task by "publishing" our current view of the memory.
             if state & SCHEDULED != 0 {
                 // Update the state without actually modifying it.
-                match (*raw.header).state.compare_exchange_weak(
+                match header.state.compare_exchange_weak(
                     state,
                     state,
                     Ordering::AcqRel,
@@ -328,7 +324,7 @@ where
                 };
 
                 // Mark the task as scheduled.
-                match (*raw.header).state.compare_exchange_weak(
+                match header.state.compare_exchange_weak(
                     state,
                     new,
                     Ordering::AcqRel,
@@ -359,18 +355,7 @@ where
 
     /// Clones a waker.
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
-        let raw = Self::from_ptr(ptr);
-
-        // Increment the reference count. With any kind of reference-counted data structure,
-        // relaxed ordering is appropriate when incrementing the counter.
-        let state = (*raw.header).state.fetch_add(REFERENCE, Ordering::Relaxed);
-
-        // If the reference count overflowed, abort.
-        if state > isize::MAX as usize {
-            abort();
-        }
-
-        RawWaker::new(ptr, &Self::RAW_WAKER_VTABLE)
+        Self::header(ptr).clone_waker(&Self::RAW_WAKER_VTABLE)
     }
 
     /// Drops a waker.
@@ -380,43 +365,10 @@ where
     /// scheduled one more time so that its future gets dropped by the executor.
     #[inline]
     unsafe fn drop_waker(ptr: *const ()) {
-        let raw = Self::from_ptr(ptr);
-
-        // Decrement the reference count.
-        let new = (*raw.header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
-
-        // If this was the last reference to the task and the `Task` has been dropped too,
-        // then we need to decide how to destroy the task.
-        if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
-            if new & (COMPLETED | CLOSED) == 0 {
-                // If the task was not completed nor closed, close it and schedule one more time so
-                // that its future gets dropped by the executor.
-                (*raw.header)
-                    .state
-                    .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
-                Self::schedule(ptr, ScheduleInfo::new(false));
-            } else {
-                // Otherwise, destroy the task right away.
-                Self::destroy(ptr);
-            }
-        }
-    }
-
-    /// Drops a task reference (`Runnable` or `Waker`).
-    ///
-    /// This function will decrement the reference count. If it drops down to zero and the
-    /// associated `Task` handle has been dropped too, then the task gets destroyed.
-    #[inline]
-    unsafe fn drop_ref(ptr: *const ()) {
-        let raw = Self::from_ptr(ptr);
-
-        // Decrement the reference count.
-        let new = (*raw.header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
-
-        // If this was the last reference to the task and the `Task` has been dropped too,
-        // then destroy the task.
-        if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
-            Self::destroy(ptr);
+        match Self::header(ptr).drop_waker() {
+            Some(Action::Schedule) => Self::schedule(ptr, ScheduleInfo::new(false)),
+            Some(Action::Destroy) => Self::destroy(ptr),
+            None => {}
         }
     }
 
@@ -426,33 +378,17 @@ where
     /// its schedule function.
     unsafe fn schedule(ptr: *const (), info: ScheduleInfo) {
         let raw = Self::from_ptr(ptr);
+        let header = Self::header(ptr);
 
         // If the schedule function has captured variables, create a temporary waker that prevents
         // the task from getting deallocated while the function is being invoked.
         let _waker;
         if mem::size_of::<S>() > 0 {
-            _waker = Waker::from_raw(Self::clone_waker(ptr));
+            _waker = Waker::from_raw(header.clone_waker(&Self::RAW_WAKER_VTABLE));
         }
 
         let task = Runnable::from_raw(NonNull::new_unchecked(ptr as *mut ()));
         (*raw.schedule).schedule(task, info);
-    }
-
-    /// Drops the future inside a task.
-    #[inline]
-    unsafe fn drop_future(ptr: *const ()) {
-        let raw = Self::from_ptr(ptr);
-
-        // We need a safeguard against panics because the destructor can panic.
-        abort_on_panic(|| {
-            raw.future.drop_in_place();
-        })
-    }
-
-    /// Returns a pointer to the output inside a task.
-    unsafe fn get_output(ptr: *const ()) -> *const () {
-        let raw = Self::from_ptr(ptr);
-        raw.output as *const ()
     }
 
     /// Cleans up task's resources and deallocates it.
@@ -462,19 +398,18 @@ where
     #[inline]
     unsafe fn destroy(ptr: *const ()) {
         let raw = Self::from_ptr(ptr);
-        let task_layout = Self::task_layout();
 
         // We need a safeguard against panics because destructors can panic.
         abort_on_panic(|| {
             // Drop the header along with the metadata.
-            (raw.header as *mut Header<M>).drop_in_place();
+            (raw.header as *mut HeaderWithMetadata<M>).drop_in_place();
 
             // Drop the schedule function.
             (raw.schedule as *mut S).drop_in_place();
         });
 
         // Finally, deallocate the memory reserved by the task.
-        alloc::alloc::dealloc(ptr as *mut u8, task_layout.layout);
+        alloc::alloc::dealloc(ptr as *mut u8, Self::TASK_LAYOUT.layout);
     }
 
     /// Runs a task.
@@ -483,31 +418,32 @@ where
     /// the caller.
     unsafe fn run(ptr: *const ()) -> bool {
         let raw = Self::from_ptr(ptr);
+        let header = Self::header(ptr);
 
         // Create a context from the raw task pointer and the vtable inside the its header.
         let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(ptr, &Self::RAW_WAKER_VTABLE)));
         let cx = &mut Context::from_waker(&waker);
 
-        let mut state = (*raw.header).state.load(Ordering::Acquire);
+        let mut state = header.state.load(Ordering::Acquire);
 
         // Update the task's state before polling its future.
         loop {
             // If the task has already been closed, drop the task reference and return.
             if state & CLOSED != 0 {
                 // Drop the future.
-                Self::drop_future(ptr);
+                drop_future::<F>(ptr, &Self::TASK_LAYOUT);
 
                 // Mark the task as unscheduled.
-                let state = (*raw.header).state.fetch_and(!SCHEDULED, Ordering::AcqRel);
+                let state = header.state.fetch_and(!SCHEDULED, Ordering::AcqRel);
 
                 // Take the awaiter out.
                 let mut awaiter = None;
                 if state & AWAITER != 0 {
-                    awaiter = (*raw.header).take(None);
+                    awaiter = header.take(None);
                 }
 
                 // Drop the task reference.
-                Self::drop_ref(ptr);
+                drop_ref(ptr);
 
                 // Notify the awaiter that the future has been dropped.
                 if let Some(w) = awaiter {
@@ -517,7 +453,7 @@ where
             }
 
             // Mark the task as unscheduled and running.
-            match (*raw.header).state.compare_exchange_weak(
+            match header.state.compare_exchange_weak(
                 state,
                 (state & !SCHEDULED) | RUNNING,
                 Ordering::AcqRel,
@@ -544,7 +480,7 @@ where
         #[cfg(feature = "std")]
         let poll = {
             // Check if we should propagate panics.
-            if (*raw.header).propagate_panic {
+            if header.propagate_panic {
                 // Use catch_unwind to catch the panic.
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx)
@@ -563,7 +499,7 @@ where
         match poll {
             Poll::Ready(out) => {
                 // Replace the future with its output.
-                Self::drop_future(ptr);
+                drop_future::<F>(ptr, &Self::TASK_LAYOUT);
                 raw.output.write(out);
 
                 // The task is now completed.
@@ -576,7 +512,7 @@ where
                     };
 
                     // Mark the task as not running and completed.
-                    match (*raw.header).state.compare_exchange_weak(
+                    match header.state.compare_exchange_weak(
                         state,
                         new,
                         Ordering::AcqRel,
@@ -593,11 +529,11 @@ where
                             // Take the awaiter out.
                             let mut awaiter = None;
                             if state & AWAITER != 0 {
-                                awaiter = (*raw.header).take(None);
+                                awaiter = header.take(None);
                             }
 
                             // Drop the task reference.
-                            Self::drop_ref(ptr);
+                            drop_ref(ptr);
 
                             // Notify the awaiter that the future has been dropped.
                             if let Some(w) = awaiter {
@@ -625,12 +561,12 @@ where
                     if state & CLOSED != 0 && !future_dropped {
                         // The thread that closed the task didn't drop the future because it was
                         // running so now it's our responsibility to do so.
-                        Self::drop_future(ptr);
+                        drop_future::<F>(ptr, &Self::TASK_LAYOUT);
                         future_dropped = true;
                     }
 
                     // Mark the task as not running.
-                    match (*raw.header).state.compare_exchange_weak(
+                    match header.state.compare_exchange_weak(
                         state,
                         new,
                         Ordering::AcqRel,
@@ -644,11 +580,11 @@ where
                                 // Take the awaiter out.
                                 let mut awaiter = None;
                                 if state & AWAITER != 0 {
-                                    awaiter = (*raw.header).take(None);
+                                    awaiter = header.take(None);
                                 }
 
                                 // Drop the task reference.
-                                Self::drop_ref(ptr);
+                                drop_ref(ptr);
 
                                 // Notify the awaiter that the future has been dropped.
                                 if let Some(w) = awaiter {
@@ -661,7 +597,7 @@ where
                                 return true;
                             } else {
                                 // Drop the task reference.
-                                Self::drop_ref(ptr);
+                                drop_ref(ptr);
                             }
                             break;
                         }
@@ -687,9 +623,11 @@ where
             fn drop(&mut self) {
                 let raw = self.0;
                 let ptr = raw.header as *const ();
+                let header = raw.header as *const Header;
 
                 unsafe {
-                    let mut state = (*raw.header).state.load(Ordering::Acquire);
+                    let header = &*header;
+                    let mut state = header.state.load(Ordering::Acquire);
 
                     loop {
                         // If the task was closed while running, then unschedule it, drop its
@@ -697,21 +635,21 @@ where
                         if state & CLOSED != 0 {
                             // The thread that closed the task didn't drop the future because it
                             // was running so now it's our responsibility to do so.
-                            RawTask::<F, T, S, M>::drop_future(ptr);
+                            drop_future::<F>(ptr, &RawTask::<F, T, S, M>::TASK_LAYOUT);
 
                             // Mark the task as not running and not scheduled.
-                            (*raw.header)
+                            header
                                 .state
                                 .fetch_and(!RUNNING & !SCHEDULED, Ordering::AcqRel);
 
                             // Take the awaiter out.
                             let mut awaiter = None;
                             if state & AWAITER != 0 {
-                                awaiter = (*raw.header).take(None);
+                                awaiter = header.take(None);
                             }
 
                             // Drop the task reference.
-                            RawTask::<F, T, S, M>::drop_ref(ptr);
+                            drop_ref(ptr);
 
                             // Notify the awaiter that the future has been dropped.
                             if let Some(w) = awaiter {
@@ -721,7 +659,7 @@ where
                         }
 
                         // Mark the task as not running, not scheduled, and closed.
-                        match (*raw.header).state.compare_exchange_weak(
+                        match header.state.compare_exchange_weak(
                             state,
                             (state & !RUNNING & !SCHEDULED) | CLOSED,
                             Ordering::AcqRel,
@@ -729,16 +667,16 @@ where
                         ) {
                             Ok(state) => {
                                 // Drop the future because the task is now closed.
-                                RawTask::<F, T, S, M>::drop_future(ptr);
+                                drop_future::<F>(ptr, &RawTask::<F, T, S, M>::TASK_LAYOUT);
 
                                 // Take the awaiter out.
                                 let mut awaiter = None;
                                 if state & AWAITER != 0 {
-                                    awaiter = (*raw.header).take(None);
+                                    awaiter = header.take(None);
                                 }
 
                                 // Drop the task reference.
-                                RawTask::<F, T, S, M>::drop_ref(ptr);
+                                drop_ref(ptr);
 
                                 // Notify the awaiter that the future has been dropped.
                                 if let Some(w) = awaiter {
@@ -752,5 +690,35 @@ where
                 }
             }
         }
+    }
+}
+
+/// Drops the future inside a task.
+#[inline]
+unsafe fn drop_future<F>(ptr: *const (), task_layout: &TaskLayout) {
+    let future_ptr = ptr.byte_add(task_layout.offset_f) as *mut F;
+
+    // We need a safeguard against panics because the destructor can panic.
+    abort_on_panic(|| {
+        future_ptr.drop_in_place();
+    })
+}
+
+/// Drops a task reference (`Runnable` or `Waker`).
+///
+/// This function will decrement the reference count. If it drops down to zero and the
+/// associated `Task` handle has been dropped too, then the task gets destroyed.
+#[inline]
+pub(crate) unsafe fn drop_ref(ptr: *const ()) {
+    let header = ptr as *const Header;
+    let header = &*header;
+
+    // Decrement the reference count.
+    let new = header.state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
+
+    // If this was the last reference to the task and the `Task` has been dropped too,
+    // then destroy the task.
+    if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
+        (header.vtable.destroy)(ptr);
     }
 }
