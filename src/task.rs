@@ -369,12 +369,6 @@ impl<T, M> Task<T, M> {
         }
     }
 
-    fn header(&self) -> &Header {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header;
-        unsafe { &*header }
-    }
-
     fn header_with_metadata(&self) -> &HeaderWithMetadata<M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const HeaderWithMetadata<M>;
