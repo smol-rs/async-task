@@ -275,21 +275,19 @@ impl Builder<()> {
     }
 }
 
-// Use a macro to brute force inlining to minimize stack copies of potentially 
+// Use a macro to brute force inlining to minimize stack copies of potentially
 // large futures.
 macro_rules! spawn_unchecked {
-    ($meta:tt, $future:ident, $schedule:ident, $builder:ident) => {
-        {
-            let ptr = RawTask::<_, _, S, $meta>::allocate($future, $schedule, $builder);
+    ($meta:tt, $future:ident, $schedule:ident, $builder:ident) => {{
+        let ptr = RawTask::<_, _, S, $meta>::allocate($future, $schedule, $builder);
 
-            let runnable = unsafe { Runnable::from_raw(ptr) };
-            let task = Task {
-                ptr,
-                _marker: PhantomData,
-            };
-            (runnable, task)
-        }
-    };
+        let runnable = unsafe { Runnable::from_raw(ptr) };
+        let task = Task {
+            ptr,
+            _marker: PhantomData,
+        };
+        (runnable, task)
+    }};
 }
 
 impl<M> Builder<M> {
