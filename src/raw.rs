@@ -204,7 +204,7 @@ where
             (raw.schedule as *mut S).write(schedule);
 
             // Explicitly avoid using abort_on_panic here to avoid extra stack
-            // copies of the future.
+            // copies of the future on lower optimization levels.
             let bomb = Bomb;
 
             // Generate the future, now that the metadata has been pinned in place.
