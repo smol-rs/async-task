@@ -6,8 +6,6 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 use core::task::Waker;
 
-use alloc::boxed::Box;
-
 use crate::header::Header;
 use crate::raw::RawTask;
 use crate::state::*;

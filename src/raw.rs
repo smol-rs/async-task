@@ -155,6 +155,14 @@ where
         F: 'a,
         M: 'a,
     {
+        struct Bomb;
+
+        impl Drop for Bomb {
+            fn drop(&mut self) {
+                abort();
+            }
+        }
+
         // Compute the layout of the task for allocation. Abort if the computation fails.
         //
         // n.b. notgull: task_layout now automatically aborts instead of panicking
@@ -195,12 +203,15 @@ where
             // Write the schedule function as the third field of the task.
             (raw.schedule as *mut S).write(schedule);
 
-            // Generate the future, now that the metadata has been pinned in place.
-            abort_on_panic(|| {
-                // Write the future as the fourth field of the task.
-                raw.future.write(future(&(*raw.header).metadata));
-            });
+            // Explicitly avoid using abort_on_panic here to avoid extra stack
+            // copies of the future.
+            let bomb = Bomb;
 
+            // Generate the future, now that the metadata has been pinned in place.
+            // Write the future as the fourth field of the task.
+            raw.future.write(future(&(*raw.header).metadata));
+
+            mem::forget(bomb);
             ptr
         }
     }
