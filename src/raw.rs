@@ -162,10 +162,8 @@ where
 
         unsafe {
             // Allocate enough space for the entire task.
-            let ptr = match NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ()) {
-                None => abort(),
-                Some(p) => p,
-            };
+            let ptr = NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ())
+                .unwrap_or_else(|| abort());
 
             let raw = Self::from_ptr(ptr.as_ptr());
 
@@ -198,10 +196,10 @@ where
             (raw.schedule as *mut S).write(schedule);
 
             // Generate the future, now that the metadata has been pinned in place.
-            let future = abort_on_panic(|| future(&(*raw.header).metadata));
-
-            // Write the future as the fourth field of the task.
-            raw.future.write(future);
+            abort_on_panic(|| {
+                // Write the future as the fourth field of the task.
+                raw.future.write(future(&(*raw.header).metadata));
+            });
 
             ptr
         }

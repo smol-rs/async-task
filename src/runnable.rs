@@ -277,6 +277,23 @@ impl Builder<()> {
     }
 }
 
+// Use a macro to brute force inlining to minimize stack copies of potentially 
+// large futures.
+macro_rules! spawn_unchecked {
+    ($meta:tt, $future:ident, $schedule:ident, $builder:ident) => {
+        {
+            let ptr = RawTask::<_, _, S, $meta>::allocate($future, $schedule, $builder);
+
+            let runnable = unsafe { Runnable::from_raw(ptr) };
+            let task = Task {
+                ptr,
+                _marker: PhantomData,
+            };
+            (runnable, task)
+        }
+    };
+}
+
 impl<M> Builder<M> {
     /// Propagates panics that occur in the task.
     ///
@@ -366,7 +383,7 @@ impl<M> Builder<M> {
         Fut::Output: Send + 'static,
         S: Schedule<M> + Send + Sync + 'static,
     {
-        unsafe { self.spawn_unchecked(future, schedule) }
+        spawn_unchecked!(M, future, schedule, self)
     }
 
     /// Creates a new thread-local task.
@@ -466,7 +483,7 @@ impl<M> Builder<M> {
             }
         };
 
-        unsafe { self.spawn_unchecked(future, schedule) }
+        spawn_unchecked!(M, future, schedule, self)
     }
 
     /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
@@ -512,24 +529,7 @@ impl<M> Builder<M> {
         S: Schedule<M>,
         M: 'a,
     {
-        // Allocate large futures on the heap.
-        let ptr = if mem::size_of::<Fut>() >= 2048 {
-            let future = |meta| {
-                let future = future(meta);
-                Box::pin(future)
-            };
-
-            RawTask::<_, Fut::Output, S, M>::allocate(future, schedule, self)
-        } else {
-            RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, self)
-        };
-
-        let runnable = Runnable::from_raw(ptr);
-        let task = Task {
-            ptr,
-            _marker: PhantomData,
-        };
-        (runnable, task)
+        spawn_unchecked!(M, future, schedule, self)
     }
 }
 
@@ -570,7 +570,9 @@ where
     F::Output: Send + 'static,
     S: Schedule + Send + Sync + 'static,
 {
-    unsafe { spawn_unchecked(future, schedule) }
+    let builder = Builder::new();
+    let future = move |_| future;
+    spawn_unchecked!((), future, schedule, builder)
 }
 
 /// Creates a new thread-local task.
@@ -650,7 +652,9 @@ where
     F: Future,
     S: Schedule,
 {
-    Builder::new().spawn_unchecked(move |()| future, schedule)
+    let builder = Builder::new();
+    let future = move |_| future;
+    spawn_unchecked!((), future, schedule, builder)
 }
 
 /// A handle to a runnable task.
