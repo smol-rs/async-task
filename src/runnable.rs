@@ -281,10 +281,7 @@ macro_rules! spawn_unchecked {
     ($meta:tt, $future:ident, $schedule:ident, $builder:ident) => {{
         let ptr = RawTask::<_, _, S, $meta>::allocate($future, $schedule, $builder);
 
-        #[allow(
-            unused_unsafe,
-            reason = "This macro might be used in unsafe functions or blocks."
-        )]
+        #[allow(unused_unsafe)]
         // SAFTETY: The task was just allocated above.
         let runnable = unsafe { Runnable::from_raw(ptr) };
         let task = Task {
