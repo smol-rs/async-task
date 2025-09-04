@@ -7,7 +7,7 @@ use core::sync::atomic::Ordering;
 use core::task::Waker;
 
 use crate::header::Header;
-use crate::raw::RawTask;
+use crate::raw::{allocate_task, RawTask};
 use crate::state::*;
 use crate::Task;
 
@@ -278,8 +278,8 @@ impl Builder<()> {
 // Use a macro to brute force inlining to minimize stack copies of potentially
 // large futures.
 macro_rules! spawn_unchecked {
-    ($meta:tt, $future:ident, $schedule:ident, $builder:ident) => {{
-        let ptr = RawTask::<_, _, S, $meta>::allocate($future, $schedule, $builder);
+    ($f:tt, $s:tt, $m:tt, $builder:ident, $schedule:ident, $raw:ident => $future:block) => {{
+        let ptr = allocate_task!($f, $s, $m, $builder, $schedule, $raw => $future);
 
         #[allow(unused_unsafe)]
         // SAFTETY: The task was just allocated above.
@@ -381,7 +381,9 @@ impl<M> Builder<M> {
         Fut::Output: Send + 'static,
         S: Schedule<M> + Send + Sync + 'static,
     {
-        spawn_unchecked!(M, future, schedule, self)
+        unsafe {
+            spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
+        }
     }
 
     /// Creates a new thread-local task.
@@ -481,7 +483,7 @@ impl<M> Builder<M> {
             }
         };
 
-        spawn_unchecked!(M, future, schedule, self)
+        unsafe { self.spawn_unchecked(future, schedule) }
     }
 
     /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
@@ -527,7 +529,7 @@ impl<M> Builder<M> {
         S: Schedule<M>,
         M: 'a,
     {
-        spawn_unchecked!(M, future, schedule, self)
+        spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
     }
 }
 
@@ -569,8 +571,7 @@ where
     S: Schedule + Send + Sync + 'static,
 {
     let builder = Builder::new();
-    let future = move |_| future;
-    spawn_unchecked!((), future, schedule, builder)
+    unsafe { spawn_unchecked!(F, S, (), builder, schedule, raw => { future }) }
 }
 
 /// Creates a new thread-local task.
@@ -651,8 +652,7 @@ where
     S: Schedule,
 {
     let builder = Builder::new();
-    let future = move |_| future;
-    spawn_unchecked!((), future, schedule, builder)
+    unsafe { spawn_unchecked!(F, S, (), builder, schedule, raw => { future }) }
 }
 
 /// A handle to a runnable task.

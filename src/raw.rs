@@ -1,16 +1,11 @@
 use alloc::alloc::Layout as StdLayout;
-use core::cell::UnsafeCell;
 use core::future::Future;
 use core::mem::{self, ManuallyDrop};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-#[cfg(not(feature = "portable-atomic"))]
-use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
-#[cfg(feature = "portable-atomic")]
-use portable_atomic::AtomicUsize;
 
 use crate::header::Header;
 use crate::runnable::{Schedule, ScheduleInfo};
@@ -99,7 +94,7 @@ impl<F, T, S, M> Clone for RawTask<F, T, S, M> {
 }
 
 impl<F, T, S, M> RawTask<F, T, S, M> {
-    const TASK_LAYOUT: TaskLayout = Self::eval_task_layout();
+    pub(crate) const TASK_LAYOUT: TaskLayout = Self::eval_task_layout();
 
     /// Computes the memory layout for a task.
     #[inline]
@@ -131,90 +126,81 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
     }
 }
 
+/// Allocates a task with the given `future` and `schedule` function.
+///
+/// It is assumed that initially only the `Runnable` and the `Task` exist.
+///
+/// Use a macro to brute force inlining to minimize stack copies of potentially
+/// large futures.
+macro_rules! allocate_task {
+    ($f:tt, $s:tt, $m:tt, $builder:ident, $schedule:ident, $raw:ident => $future:block) => {{
+        let allocation =
+            alloc::alloc::alloc(RawTask::<$f, <$f as Future>::Output, $s, $m>::TASK_LAYOUT.layout);
+        // Allocate enough space for the entire task.
+        let ptr = NonNull::new(allocation as *mut ()).unwrap_or_else(|| crate::utils::abort());
+
+        let $raw = RawTask::<$f, <$f as Future>::Output, $s, $m>::from_ptr(ptr.as_ptr());
+
+        let crate::Builder {
+            metadata,
+            #[cfg(feature = "std")]
+            propagate_panic,
+        } = $builder;
+
+        // Write the header as the first field of the task.
+        ($raw.header as *mut Header<$m>).write(Header {
+            #[cfg(not(feature = "portable-atomic"))]
+            state: core::sync::atomic::AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
+            #[cfg(feature = "portable-atomic")]
+            state: portable_atomic::AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
+            awaiter: core::cell::UnsafeCell::new(None),
+            vtable: &RawTask::<$f, <$f as Future>::Output, $s, $m>::TASK_VTABLE,
+            metadata,
+            #[cfg(feature = "std")]
+            propagate_panic,
+        });
+
+        // Write the schedule function as the third field of the task.
+        ($raw.schedule as *mut S).write($schedule);
+
+        // Explicitly avoid using abort_on_panic here to avoid extra stack
+        // copies of the future on lower optimization levels.
+        let bomb = crate::utils::Bomb;
+
+        // Generate the future, now that the metadata has been pinned in place.
+        // Write the future as the fourth field of the task.
+        $raw.future.write($future);
+        // (&(*raw.header).metadata)
+
+        mem::forget(bomb);
+        ptr
+    }};
+}
+
+pub(crate) use allocate_task;
+
 impl<F, T, S, M> RawTask<F, T, S, M>
 where
     F: Future<Output = T>,
     S: Schedule<M>,
 {
-    const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+    pub(crate) const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
         Self::wake,
         Self::wake_by_ref,
         Self::drop_waker,
     );
 
-    /// Allocates a task with the given `future` and `schedule` function.
-    ///
-    /// It is assumed that initially only the `Runnable` and the `Task` exist.
-    pub(crate) fn allocate<'a, Gen: FnOnce(&'a M) -> F>(
-        future: Gen,
-        schedule: S,
-        builder: crate::Builder<M>,
-    ) -> NonNull<()>
-    where
-        F: 'a,
-        M: 'a,
-    {
-        struct Bomb;
-
-        impl Drop for Bomb {
-            fn drop(&mut self) {
-                abort();
-            }
-        }
-
-        // Compute the layout of the task for allocation. Abort if the computation fails.
-        //
-        // n.b. notgull: task_layout now automatically aborts instead of panicking
-        let task_layout = Self::task_layout();
-
-        unsafe {
-            // Allocate enough space for the entire task.
-            let ptr = NonNull::new(alloc::alloc::alloc(task_layout.layout) as *mut ())
-                .unwrap_or_else(|| abort());
-
-            let raw = Self::from_ptr(ptr.as_ptr());
-
-            let crate::Builder {
-                metadata,
-                #[cfg(feature = "std")]
-                propagate_panic,
-            } = builder;
-
-            // Write the header as the first field of the task.
-            (raw.header as *mut Header<M>).write(Header {
-                state: AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
-                awaiter: UnsafeCell::new(None),
-                vtable: &TaskVTable {
-                    schedule: Self::schedule,
-                    drop_future: Self::drop_future,
-                    get_output: Self::get_output,
-                    drop_ref: Self::drop_ref,
-                    destroy: Self::destroy,
-                    run: Self::run,
-                    clone_waker: Self::clone_waker,
-                    layout_info: &Self::TASK_LAYOUT,
-                },
-                metadata,
-                #[cfg(feature = "std")]
-                propagate_panic,
-            });
-
-            // Write the schedule function as the third field of the task.
-            (raw.schedule as *mut S).write(schedule);
-
-            // Explicitly avoid using abort_on_panic here to avoid extra stack
-            // copies of the future on lower optimization levels.
-            let bomb = Bomb;
-
-            // Generate the future, now that the metadata has been pinned in place.
-            // Write the future as the fourth field of the task.
-            raw.future.write(future(&(*raw.header).metadata));
-
-            mem::forget(bomb);
-            ptr
-        }
-    }
+    pub(crate) const TASK_VTABLE: TaskVTable = TaskVTable {
+        schedule: Self::schedule,
+        drop_future: Self::drop_future,
+        get_output: Self::get_output,
+        drop_ref: Self::drop_ref,
+        destroy: Self::destroy,
+        run: Self::run,
+        clone_waker: Self::clone_waker,
+        layout_info: &Self::TASK_LAYOUT,
+    };
 
     /// Creates a `RawTask` from a raw task pointer.
     #[inline]
