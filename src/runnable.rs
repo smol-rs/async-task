@@ -652,7 +652,7 @@ where
     S: Schedule,
 {
     let builder = Builder::new();
-    unsafe { spawn_unchecked!(F, S, (), builder, schedule, raw => { future }) }
+    spawn_unchecked!(F, S, (), builder, schedule, raw => { future })
 }
 
 /// A handle to a runnable task.
