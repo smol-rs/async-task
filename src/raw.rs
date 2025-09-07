@@ -419,7 +419,7 @@ where
             }
         }
 
-        return false;
+        false
     }
 }
 
@@ -533,7 +533,7 @@ unsafe fn drop_waker(ptr: *const ()) {
     let header = ptr as *const Header;
     match Header::drop_waker(ptr) {
         Some(Action::Schedule) => ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false)),
-        Some(Action::Destroy) => (((*header).vtable.destroy))(ptr),
+        Some(Action::Destroy) => ((*header).vtable.destroy)(ptr),
         None => {}
     }
 }
@@ -619,7 +619,7 @@ unsafe fn wake<S: Schedule<M>, M>(ptr: *const ()) {
 unsafe fn wake_by_ref<S: Schedule<M>, M>(ptr: *const ()) {
     let header = ptr as *const Header;
     let header = &*header;
-    let task_layout = (*header).vtable.layout_info;
+    let task_layout = header.vtable.layout_info;
 
     let mut state = header.state.load(Ordering::Acquire);
 
