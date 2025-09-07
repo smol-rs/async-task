@@ -743,7 +743,7 @@ impl<M> Runnable<M> {
         mem::forget(self);
 
         unsafe {
-            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false), (*header).vtable);
+            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
         }
     }
 
@@ -807,10 +807,8 @@ impl<M> Runnable<M> {
     /// assert_eq!(r.len(), 1);
     /// ```
     pub fn waker(&self) -> Waker {
-        let header = self.header();
-
         unsafe {
-            let raw_waker = Header::clone_waker(self.ptr.as_ptr(), header.vtable.raw_waker_vtable);
+            let raw_waker = Header::clone_waker(self.ptr.as_ptr());
             Waker::from_raw(raw_waker)
         }
     }

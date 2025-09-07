@@ -242,16 +242,9 @@ impl<T, M> Task<T, M> {
                                 // schedule dropping its future or destroy it.
                                 if state & !(REFERENCE - 1) == 0 {
                                     if state & CLOSED == 0 {
-                                        ((*header).vtable.schedule)(
-                                            ptr,
-                                            ScheduleInfo::new(false),
-                                            (*header).vtable,
-                                        );
+                                        ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
                                     } else {
-                                        ((*header).vtable.destroy)(
-                                            ptr,
-                                            (*header).vtable.layout_info,
-                                        );
+                                        ((*header).vtable.destroy)(ptr);
                                     }
                                 }
 
@@ -431,11 +424,7 @@ fn set_canceled(ptr: *const ()) {
                     // If the task is not scheduled nor running, schedule it one more time so
                     // that its future gets dropped by the executor.
                     if state & (SCHEDULED | RUNNING) == 0 {
-                        ((*header).vtable.schedule)(
-                            ptr,
-                            ScheduleInfo::new(false),
-                            (*header).vtable,
-                        );
+                        ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
                     }
 
                     // Notify the awaiter that the task has been closed.

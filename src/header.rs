@@ -1,6 +1,6 @@
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::task::{RawWaker, RawWakerVTable, Waker};
+use core::task::{RawWaker, Waker};
 
 #[cfg(not(feature = "portable-atomic"))]
 use core::sync::atomic::AtomicUsize;
@@ -157,7 +157,7 @@ impl Header {
     }
 
     /// Clones a waker.
-    pub(crate) unsafe fn clone_waker(ptr: *const (), vtable: &'static RawWakerVTable) -> RawWaker {
+    pub(crate) unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
         let header = ptr as *const Header;
 
         // Increment the reference count. With any kind of reference-counted data structure,
@@ -169,7 +169,7 @@ impl Header {
             abort();
         }
 
-        RawWaker::new(ptr, vtable)
+        RawWaker::new(ptr, (*header).vtable.raw_waker_vtable)
     }
 
     #[inline(never)]

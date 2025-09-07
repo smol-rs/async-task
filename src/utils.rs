@@ -4,6 +4,7 @@ use core::mem;
 /// Aborts the process.
 ///
 /// To abort, this function simply panics while panicking.
+#[cfg(not(feature = "std"))]
 pub(crate) fn abort() -> ! {
     struct Panic;
 
@@ -16,6 +17,9 @@ pub(crate) fn abort() -> ! {
     let _panic = Panic;
     panic!("aborting the process");
 }
+
+#[cfg(feature = "std")]
+pub use std::process::abort;
 
 /// Calls a function and aborts if it panics.
 ///
