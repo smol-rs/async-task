@@ -13,9 +13,14 @@ use crate::state::*;
 use crate::utils::abort;
 use crate::utils::abort_on_panic;
 
-pub(crate) enum Action {
+/// Actions to take upon calling [`Header::drop_waker`].
+pub(crate) enum DropWakerAction {
+    /// Re-schedule the task
     Schedule,
+    /// Destroy the task.
     Destroy,
+    /// Do nothing.
+    None,
 }
 
 pub(crate) struct Header {
@@ -173,7 +178,7 @@ impl Header {
     }
 
     #[inline(never)]
-    pub(crate) unsafe fn drop_waker(ptr: *const ()) -> Option<Action> {
+    pub(crate) unsafe fn drop_waker(ptr: *const ()) -> DropWakerAction {
         let header = ptr as *const Header;
 
         // Decrement the reference count.
@@ -188,13 +193,13 @@ impl Header {
                 (*header)
                     .state
                     .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
-                Some(Action::Schedule)
+                DropWakerAction::Schedule
             } else {
                 // Otherwise, destroy the task right away.
-                Some(Action::Destroy)
+                DropWakerAction::Destroy
             }
         } else {
-            None
+            DropWakerAction::None
         }
     }
 }

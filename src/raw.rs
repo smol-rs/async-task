@@ -13,7 +13,7 @@ use core::sync::atomic::Ordering;
 #[cfg(feature = "portable-atomic")]
 use portable_atomic::AtomicUsize;
 
-use crate::header::{Action, Header, HeaderWithMetadata};
+use crate::header::{DropWakerAction, Header, HeaderWithMetadata};
 use crate::runnable::{Schedule, ScheduleInfo};
 use crate::state::*;
 use crate::utils::{abort, abort_on_panic, max, Layout};
@@ -532,9 +532,9 @@ unsafe fn schedule<S: Schedule<M>, M>(ptr: *const (), info: ScheduleInfo) {
 unsafe fn drop_waker(ptr: *const ()) {
     let header = ptr as *const Header;
     match Header::drop_waker(ptr) {
-        Some(Action::Schedule) => ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false)),
-        Some(Action::Destroy) => ((*header).vtable.destroy)(ptr),
-        None => {}
+        DropWakerAction::Schedule => ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false)),
+        DropWakerAction::Destroy => ((*header).vtable.destroy)(ptr),
+        DropWakerAction::None => {}
     }
 }
 
