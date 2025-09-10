@@ -9,7 +9,7 @@ use core::sync::atomic::Ordering;
 use portable_atomic::AtomicUsize;
 
 use crate::raw::TaskVTable;
-use crate::state::*;
+use crate::{state::*, Runnable, ScheduleInfo};
 use crate::utils::abort_on_panic;
 
 /// The header of a task.
@@ -31,6 +31,8 @@ pub(crate) struct Header<M> {
     /// In addition to the actual waker virtual table, it also contains pointers to several other
     /// methods necessary for bookkeeping the heap-allocated task.
     pub(crate) vtable: &'static TaskVTable,
+
+    pub(crate) schedule: fn(Runnable<M>, ScheduleInfo),
 
     /// Metadata associated with the task.
     ///

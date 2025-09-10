@@ -13,15 +13,6 @@ use crate::raw::RawTask;
 use crate::state::*;
 use crate::Task;
 
-mod sealed {
-    use super::*;
-    pub trait Sealed<M> {}
-
-    impl<M, F> Sealed<M> for F where F: Fn(Runnable<M>) {}
-
-    impl<M, F> Sealed<M> for WithInfo<F> where F: Fn(Runnable<M>, ScheduleInfo) {}
-}
-
 /// A builder that creates a new task.
 #[derive(Debug)]
 pub struct Builder<M> {
@@ -91,80 +82,6 @@ impl ScheduleInfo {
         ScheduleInfo {
             woken_while_running,
         }
-    }
-}
-
-/// The trait for scheduling functions.
-pub trait Schedule<M = ()>: sealed::Sealed<M> {
-    /// The actual scheduling procedure.
-    fn schedule(&self, runnable: Runnable<M>, info: ScheduleInfo);
-}
-
-impl<M, F> Schedule<M> for F
-where
-    F: Fn(Runnable<M>),
-{
-    fn schedule(&self, runnable: Runnable<M>, _: ScheduleInfo) {
-        self(runnable)
-    }
-}
-
-/// Pass a scheduling function with more scheduling information - a.k.a.
-/// [`ScheduleInfo`].
-///
-/// Sometimes, it's useful to pass the runnable's state directly to the
-/// scheduling function, such as whether it's woken up while running. The
-/// scheduler can thus use the information to determine its scheduling
-/// strategy.
-///
-/// The data source of [`ScheduleInfo`] is directly from the actual
-/// implementation of the crate itself, different from [`Runnable`]'s metadata,
-/// which is managed by the caller.
-///
-/// # Examples
-///
-/// ```
-/// use async_task::{ScheduleInfo, WithInfo};
-/// use std::sync::{Arc, Mutex};
-///
-/// // The future inside the task.
-/// let future = async {
-///     println!("Hello, world!");
-/// };
-///
-/// // If the task gets woken up while running, it will be sent into this channel.
-/// let (s, r) = flume::unbounded();
-/// // Otherwise, it will be placed into this slot.
-/// let lifo_slot = Arc::new(Mutex::new(None));
-/// let schedule = move |runnable, info: ScheduleInfo| {
-///     if info.woken_while_running {
-///         s.send(runnable).unwrap()
-///     } else {
-///         let last = lifo_slot.lock().unwrap().replace(runnable);
-///         if let Some(last) = last {
-///             s.send(last).unwrap()
-///         }
-///     }
-/// };
-///
-/// // Create a task with the future and the schedule function.
-/// let (runnable, task) = async_task::spawn(future, WithInfo(schedule));
-/// ```
-#[derive(Debug)]
-pub struct WithInfo<F>(pub F);
-
-impl<F> From<F> for WithInfo<F> {
-    fn from(value: F) -> Self {
-        WithInfo(value)
-    }
-}
-
-impl<M, F> Schedule<M> for WithInfo<F>
-where
-    F: Fn(Runnable<M>, ScheduleInfo),
-{
-    fn schedule(&self, runnable: Runnable<M>, info: ScheduleInfo) {
-        (self.0)(runnable, info)
     }
 }
 
@@ -359,12 +276,11 @@ impl<M> Builder<M> {
     /// // Create a task with the future and the schedule function.
     /// let (runnable, task) = Builder::new().spawn(|()| future, schedule);
     /// ```
-    pub fn spawn<F, Fut, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<Fut::Output, M>)
+    pub fn spawn<F, Fut>(self, future: F, schedule: fn(Runnable<M>, ScheduleInfo)) -> (Runnable<M>, Task<Fut::Output, M>)
     where
         F: FnOnce(&M) -> Fut,
         Fut: Future + Send + 'static,
         Fut::Output: Send + 'static,
-        S: Schedule<M> + Send + Sync + 'static,
     {
         unsafe { self.spawn_unchecked(future, schedule) }
     }
@@ -402,16 +318,15 @@ impl<M> Builder<M> {
     /// let (runnable, task) = Builder::new().spawn_local(move |()| future, schedule);
     /// ```
     #[cfg(feature = "std")]
-    pub fn spawn_local<F, Fut, S>(
+    pub fn spawn_local<F, Fut>(
         self,
         future: F,
-        schedule: S,
+        schedule: fn(Runnable<M>, ScheduleInfo),
     ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
         F: FnOnce(&M) -> Fut,
         Fut: Future + 'static,
         Fut::Output: 'static,
-        S: Schedule<M> + Send + Sync + 'static,
     {
         use std::mem::ManuallyDrop;
         use std::pin::Pin;
@@ -501,15 +416,14 @@ impl<M> Builder<M> {
     /// // Create a task with the future and the schedule function.
     /// let (runnable, task) = unsafe { Builder::new().spawn_unchecked(move |()| future, schedule) };
     /// ```
-    pub unsafe fn spawn_unchecked<'a, F, Fut, S>(
+    pub unsafe fn spawn_unchecked<'a, F, Fut>(
         self,
         future: F,
-        schedule: S,
+        schedule: fn(Runnable<M>, ScheduleInfo),
     ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
         F: FnOnce(&'a M) -> Fut,
         Fut: Future + 'a,
-        S: Schedule<M>,
         M: 'a,
     {
         // Allocate large futures on the heap.
@@ -519,9 +433,9 @@ impl<M> Builder<M> {
                 Box::pin(future)
             };
 
-            RawTask::<_, Fut::Output, S, M>::allocate(future, schedule, self)
+            RawTask::<_, Fut::Output, M>::allocate(future, schedule, self)
         } else {
-            RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, self)
+            RawTask::<Fut, Fut::Output, M>::allocate(future, schedule, self)
         };
 
         let runnable = Runnable::from_raw(ptr);
@@ -531,126 +445,6 @@ impl<M> Builder<M> {
         };
         (runnable, task)
     }
-}
-
-/// Creates a new task.
-///
-/// The returned [`Runnable`] is used to poll the `future`, and the [`Task`] is used to await its
-/// output.
-///
-/// Method [`run()`][`Runnable::run()`] polls the task's future once. Then, the [`Runnable`]
-/// vanishes and only reappears when its [`Waker`] wakes the task, thus scheduling it to be run
-/// again.
-///
-/// When the task is woken, its [`Runnable`] is passed to the `schedule` function.
-/// The `schedule` function should not attempt to run the [`Runnable`] nor to drop it. Instead, it
-/// should push it into a task queue so that it can be processed later.
-///
-/// If you need to spawn a future that does not implement [`Send`] or isn't `'static`, consider
-/// using [`spawn_local()`] or [`spawn_unchecked()`] instead.
-///
-/// # Examples
-///
-/// ```
-/// // The future inside the task.
-/// let future = async {
-///     println!("Hello, world!");
-/// };
-///
-/// // A function that schedules the task when it gets woken up.
-/// let (s, r) = flume::unbounded();
-/// let schedule = move |runnable| s.send(runnable).unwrap();
-///
-/// // Create a task with the future and the schedule function.
-/// let (runnable, task) = async_task::spawn(future, schedule);
-/// ```
-pub fn spawn<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-    S: Schedule + Send + Sync + 'static,
-{
-    unsafe { spawn_unchecked(future, schedule) }
-}
-
-/// Creates a new thread-local task.
-///
-/// This function is same as [`spawn()`], except it does not require [`Send`] on `future`. If the
-/// [`Runnable`] is used or dropped on another thread, a panic will occur.
-///
-/// This function is only available when the `std` feature for this crate is enabled.
-///
-/// # Examples
-///
-/// ```
-/// use async_task::Runnable;
-/// use flume::{Receiver, Sender};
-/// use std::rc::Rc;
-///
-/// thread_local! {
-///     // A queue that holds scheduled tasks.
-///     static QUEUE: (Sender<Runnable>, Receiver<Runnable>) = flume::unbounded();
-/// }
-///
-/// // Make a non-Send future.
-/// let msg: Rc<str> = "Hello, world!".into();
-/// let future = async move {
-///     println!("{}", msg);
-/// };
-///
-/// // A function that schedules the task when it gets woken up.
-/// let s = QUEUE.with(|(s, _)| s.clone());
-/// let schedule = move |runnable| s.send(runnable).unwrap();
-///
-/// // Create a task with the future and the schedule function.
-/// let (runnable, task) = async_task::spawn_local(future, schedule);
-/// ```
-#[cfg(feature = "std")]
-pub fn spawn_local<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
-where
-    F: Future + 'static,
-    F::Output: 'static,
-    S: Schedule + Send + Sync + 'static,
-{
-    Builder::new().spawn_local(move |()| future, schedule)
-}
-
-/// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
-///
-/// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
-/// `'static` on `future` and `schedule`.
-///
-/// # Safety
-///
-/// - If `future` is not [`Send`], its [`Runnable`] must be used and dropped on the original
-///   thread.
-/// - If `future` is not `'static`, borrowed variables must outlive its [`Runnable`].
-/// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
-///   must be used and dropped on the original thread.
-/// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the
-///   [`Runnable`]'s [`Waker`].
-///
-/// # Examples
-///
-/// ```
-/// // The future inside the task.
-/// let future = async {
-///     println!("Hello, world!");
-/// };
-///
-/// // If the task gets woken up, it will be sent into this channel.
-/// let (s, r) = flume::unbounded();
-/// let schedule = move |runnable| s.send(runnable).unwrap();
-///
-/// // Create a task with the future and the schedule function.
-/// let (runnable, task) = unsafe { async_task::spawn_unchecked(future, schedule) };
-/// ```
-pub unsafe fn spawn_unchecked<F, S>(future: F, schedule: S) -> (Runnable, Task<F::Output>)
-where
-    F: Future,
-    S: Schedule,
-{
-    Builder::new().spawn_unchecked(move |()| future, schedule)
 }
 
 /// A handle to a runnable task.
@@ -714,35 +508,6 @@ impl<M> Runnable<M> {
     /// is a `()` value. See the [`Builder::metadata()`] method for more information.
     pub fn metadata(&self) -> &M {
         &self.header().metadata
-    }
-
-    /// Schedules the task.
-    ///
-    /// This is a convenience method that passes the [`Runnable`] to the schedule function.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // A function that schedules the task when it gets woken up.
-    /// let (s, r) = flume::unbounded();
-    /// let schedule = move |runnable| s.send(runnable).unwrap();
-    ///
-    /// // Create a task with a simple future and the schedule function.
-    /// let (runnable, task) = async_task::spawn(async {}, schedule);
-    ///
-    /// // Schedule the task.
-    /// assert_eq!(r.len(), 0);
-    /// runnable.schedule();
-    /// assert_eq!(r.len(), 1);
-    /// ```
-    pub fn schedule(self) {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
-        mem::forget(self);
-
-        unsafe {
-            ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
-        }
     }
 
     /// Runs the task by polling its future.
