@@ -85,8 +85,8 @@ impl<T, M> Task<T, M> {
     /// .detach();
     /// ```
     pub fn detach(self) {
-        let mut this = self;
-        let _out = this.set_detached();
+        let this = self;
+        let _out = set_detached::<T>(this.ptr.as_ptr());
         mem::forget(this);
     }
 
@@ -179,189 +179,6 @@ impl<T, M> Task<T, M> {
         FallibleTask { task: self }
     }
 
-    /// Puts the task in detached state.
-    fn set_detached(&mut self) -> Option<Result<T, Panic>> {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header;
-
-        unsafe {
-            // A place where the output will be stored in case it needs to be dropped.
-            let mut output = None;
-
-            // Optimistically assume the `Task` is being detached just after creating the task.
-            // This is a common case so if the `Task` is datached, the overhead of it is only one
-            // compare-exchange operation.
-            if let Err(mut state) = (*header).state.compare_exchange_weak(
-                SCHEDULED | TASK | REFERENCE,
-                SCHEDULED | REFERENCE,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                loop {
-                    // If the task has been completed but not yet closed, that means its output
-                    // must be dropped.
-                    if state & COMPLETED != 0 && state & CLOSED == 0 {
-                        // Mark the task as closed in order to grab its output.
-                        match (*header).state.compare_exchange_weak(
-                            state,
-                            state | CLOSED,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // Read the output.
-                                output = Some(
-                                    ((*header).vtable.get_output(ptr) as *mut Result<T, Panic>)
-                                        .read(),
-                                );
-
-                                // Update the state variable because we're continuing the loop.
-                                state |= CLOSED;
-                            }
-                            Err(s) => state = s,
-                        }
-                    } else {
-                        // If this is the last reference to the task and it's not closed, then
-                        // close it and schedule one more time so that its future gets dropped by
-                        // the executor.
-                        let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
-                            SCHEDULED | CLOSED | REFERENCE
-                        } else {
-                            state & !TASK
-                        };
-
-                        // Unset the `TASK` flag.
-                        match (*header).state.compare_exchange_weak(
-                            state,
-                            new,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) {
-                            Ok(_) => {
-                                // If this is the last reference to the task, we need to either
-                                // schedule dropping its future or destroy it.
-                                if state & !(REFERENCE - 1) == 0 {
-                                    if state & CLOSED == 0 {
-                                        ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
-                                    } else {
-                                        ((*header).vtable.destroy)(ptr);
-                                    }
-                                }
-
-                                break;
-                            }
-                            Err(s) => state = s,
-                        }
-                    }
-                }
-            }
-
-            output
-        }
-    }
-
-    /// Polls the task to retrieve its output.
-    ///
-    /// Returns `Some` if the task has completed or `None` if it was closed.
-    ///
-    /// A task becomes closed in the following cases:
-    ///
-    /// 1. It gets canceled by `Runnable::drop()`, `Task::drop()`, or `Task::cancel()`.
-    /// 2. Its output gets awaited by the `Task`.
-    /// 3. It panics while polling the future.
-    /// 4. It is completed and the `Task` gets dropped.
-    fn poll_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header;
-
-        unsafe {
-            let mut state = (*header).state.load(Ordering::Acquire);
-
-            loop {
-                // If the task has been closed, notify the awaiter and return `None`.
-                if state & CLOSED != 0 {
-                    // If the task is scheduled or running, we need to wait until its future is
-                    // dropped.
-                    if state & (SCHEDULED | RUNNING) != 0 {
-                        // Replace the waker with one associated with the current task.
-                        (*header).register(cx.waker());
-
-                        // Reload the state after registering. It is possible changes occurred just
-                        // before registration so we need to check for that.
-                        state = (*header).state.load(Ordering::Acquire);
-
-                        // If the task is still scheduled or running, we need to wait because its
-                        // future is not dropped yet.
-                        if state & (SCHEDULED | RUNNING) != 0 {
-                            return Poll::Pending;
-                        }
-                    }
-
-                    // Even though the awaiter is most likely the current task, it could also be
-                    // another task.
-                    (*header).notify(Some(cx.waker()));
-                    return Poll::Ready(None);
-                }
-
-                // If the task is not completed, register the current task.
-                if state & COMPLETED == 0 {
-                    // Replace the waker with one associated with the current task.
-                    (*header).register(cx.waker());
-
-                    // Reload the state after registering. It is possible that the task became
-                    // completed or closed just before registration so we need to check for that.
-                    state = (*header).state.load(Ordering::Acquire);
-
-                    // If the task has been closed, restart.
-                    if state & CLOSED != 0 {
-                        continue;
-                    }
-
-                    // If the task is still not completed, we're blocked on it.
-                    if state & COMPLETED == 0 {
-                        return Poll::Pending;
-                    }
-                }
-
-                // Since the task is now completed, mark it as closed in order to grab its output.
-                match (*header).state.compare_exchange(
-                    state,
-                    state | CLOSED,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // Notify the awaiter. Even though the awaiter is most likely the current
-                        // task, it could also be another task.
-                        if state & AWAITER != 0 {
-                            (*header).notify(Some(cx.waker()));
-                        }
-
-                        // Take the output from the task.
-                        let output = (*header).vtable.get_output(ptr) as *mut Result<T, Panic>;
-                        let output = output.read();
-
-                        // Propagate the panic if the task panicked.
-                        let output = match output {
-                            Ok(output) => output,
-                            #[allow(unreachable_patterns)]
-                            Err(panic) => {
-                                #[cfg(feature = "std")]
-                                std::panic::resume_unwind(panic);
-
-                                #[cfg(not(feature = "std"))]
-                                match panic {}
-                            }
-                        };
-
-                        return Poll::Ready(Some(output));
-                    }
-                    Err(s) => state = s,
-                }
-            }
-        }
-    }
-
     fn header_with_metadata(&self) -> &HeaderWithMetadata<M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const HeaderWithMetadata<M>;
@@ -389,6 +206,87 @@ impl<T, M> Task<T, M> {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const HeaderWithMetadata<M>;
         &unsafe { &*header }.metadata
+    }
+}
+
+/// Puts the task in detached state.
+#[inline(never)]
+fn set_detached<T>(ptr: *const ()) -> Option<Result<T, Panic>> {
+    let header = ptr as *const Header;
+
+    unsafe {
+        // A place where the output will be stored in case it needs to be dropped.
+        let mut output = None;
+
+        // Optimistically assume the `Task` is being detached just after creating the task.
+        // This is a common case so if the `Task` is datached, the overhead of it is only one
+        // compare-exchange operation.
+        if let Err(mut state) = (*header).state.compare_exchange_weak(
+            SCHEDULED | TASK | REFERENCE,
+            SCHEDULED | REFERENCE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            loop {
+                // If the task has been completed but not yet closed, that means its output
+                // must be dropped.
+                if state & COMPLETED != 0 && state & CLOSED == 0 {
+                    // Mark the task as closed in order to grab its output.
+                    match (*header).state.compare_exchange_weak(
+                        state,
+                        state | CLOSED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // Read the output.
+                            output = Some(
+                                ((*header).vtable.get_output(ptr) as *mut Result<T, Panic>)
+                                    .read(),
+                            );
+
+                            // Update the state variable because we're continuing the loop.
+                            state |= CLOSED;
+                        }
+                        Err(s) => state = s,
+                    }
+                } else {
+                    // If this is the last reference to the task and it's not closed, then
+                    // close it and schedule one more time so that its future gets dropped by
+                    // the executor.
+                    let new = if state & (!(REFERENCE - 1) | CLOSED) == 0 {
+                        SCHEDULED | CLOSED | REFERENCE
+                    } else {
+                        state & !TASK
+                    };
+
+                    // Unset the `TASK` flag.
+                    match (*header).state.compare_exchange_weak(
+                        state,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // If this is the last reference to the task, we need to either
+                            // schedule dropping its future or destroy it.
+                            if state & !(REFERENCE - 1) == 0 {
+                                if state & CLOSED == 0 {
+                                    ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
+                                } else {
+                                    ((*header).vtable.destroy)(ptr);
+                                }
+                            }
+
+                            break;
+                        }
+                        Err(s) => state = s,
+                    }
+                }
+            }
+        }
+
+        output
     }
 }
 
@@ -440,18 +338,120 @@ fn set_canceled(ptr: *const ()) {
     }
 }
 
+/// Polls the task to retrieve its output.
+///
+/// Returns `Some` if the task has completed or `None` if it was closed.
+///
+/// A task becomes closed in the following cases:
+///
+/// 1. It gets canceled by `Runnable::drop()`, `Task::drop()`, or `Task::cancel()`.
+/// 2. Its output gets awaited by the `Task`.
+/// 3. It panics while polling the future.
+/// 4. It is completed and the `Task` gets dropped.
+fn poll_task<T>(ptr: *const (), cx: &mut Context<'_>) -> Poll<Option<T>> {
+    let header = ptr as *const Header;
+
+    unsafe {
+        let mut state = (*header).state.load(Ordering::Acquire);
+
+        loop {
+            // If the task has been closed, notify the awaiter and return `None`.
+            if state & CLOSED != 0 {
+                // If the task is scheduled or running, we need to wait until its future is
+                // dropped.
+                if state & (SCHEDULED | RUNNING) != 0 {
+                    // Replace the waker with one associated with the current task.
+                    (*header).register(cx.waker());
+
+                    // Reload the state after registering. It is possible changes occurred just
+                    // before registration so we need to check for that.
+                    state = (*header).state.load(Ordering::Acquire);
+
+                    // If the task is still scheduled or running, we need to wait because its
+                    // future is not dropped yet.
+                    if state & (SCHEDULED | RUNNING) != 0 {
+                        return Poll::Pending;
+                    }
+                }
+
+                // Even though the awaiter is most likely the current task, it could also be
+                // another task.
+                (*header).notify(Some(cx.waker()));
+                return Poll::Ready(None);
+            }
+
+            // If the task is not completed, register the current task.
+            if state & COMPLETED == 0 {
+                // Replace the waker with one associated with the current task.
+                (*header).register(cx.waker());
+
+                // Reload the state after registering. It is possible that the task became
+                // completed or closed just before registration so we need to check for that.
+                state = (*header).state.load(Ordering::Acquire);
+
+                // If the task has been closed, restart.
+                if state & CLOSED != 0 {
+                    continue;
+                }
+
+                // If the task is still not completed, we're blocked on it.
+                if state & COMPLETED == 0 {
+                    return Poll::Pending;
+                }
+            }
+
+            // Since the task is now completed, mark it as closed in order to grab its output.
+            match (*header).state.compare_exchange(
+                state,
+                state | CLOSED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    // Notify the awaiter. Even though the awaiter is most likely the current
+                    // task, it could also be another task.
+                    if state & AWAITER != 0 {
+                        (*header).notify(Some(cx.waker()));
+                    }
+
+                    // Take the output from the task.
+                    let output = (*header).vtable.get_output(ptr) as *mut Result<T, Panic>;
+                    let output = output.read();
+
+                    // Propagate the panic if the task panicked.
+                    let output = match output {
+                        Ok(output) => output,
+                        #[allow(unreachable_patterns)]
+                        Err(panic) => {
+                            #[cfg(feature = "std")]
+                            std::panic::resume_unwind(panic);
+
+                            #[cfg(not(feature = "std"))]
+                            match panic {}
+                        }
+                    };
+
+                    return Poll::Ready(Some(output));
+                }
+                Err(s) => state = s,
+            }
+        }
+    }
+}
+
 impl<T, M> Drop for Task<T, M> {
     fn drop(&mut self) {
-        set_canceled(self.ptr.as_ptr());
-        self.set_detached();
+        let ptr = self.ptr.as_ptr();
+        set_canceled(ptr);
+        set_detached::<T>(ptr);
     }
 }
 
 impl<T, M> Future for Task<T, M> {
     type Output = T;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.poll_task(cx) {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match poll_task::<T>(self.ptr.as_ptr(), cx) {
             Poll::Ready(t) => Poll::Ready(t.expect("Task polled after completion")),
             Poll::Pending => Poll::Pending,
         }
@@ -554,8 +554,8 @@ impl<T, M> FallibleTask<T, M> {
 impl<T, M> Future for FallibleTask<T, M> {
     type Output = Option<T>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.task.poll_task(cx)
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        poll_task::<T>(self.task.ptr.as_ptr(), cx)
     }
 }
 
