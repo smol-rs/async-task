@@ -36,6 +36,9 @@
 //!
 //! // Push the task into the queue by invoking its schedule function.
 //! runnable.schedule();
+//! # let handle = std::thread::spawn(move || { for runnable in receiver { runnable.run(); }});
+//! # smol::future::block_on(task);
+//! # handle.join().unwrap();
 //! ```
 //!
 //! The [`Runnable`] is used to poll the task's future, and the [`Task`] is used to await its

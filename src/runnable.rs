@@ -736,6 +736,9 @@ impl<M> Runnable<M> {
     /// assert_eq!(r.len(), 0);
     /// runnable.schedule();
     /// assert_eq!(r.len(), 1);
+    /// # let handle = std::thread::spawn(move || { for runnable in r { runnable.run(); }});
+    /// # smol::future::block_on(task);
+    /// # handle.join().unwrap();
     /// ```
     pub fn schedule(self) {
         let ptr = self.ptr.as_ptr();
@@ -805,6 +808,9 @@ impl<M> Runnable<M> {
     /// assert_eq!(r.len(), 0);
     /// waker.wake();
     /// assert_eq!(r.len(), 1);
+    /// # let handle = std::thread::spawn(move || { for runnable in r { runnable.run(); }});
+    /// # smol::future::block_on(task.cancel()); // cancel because the future is future::pending
+    /// # handle.join().unwrap();
     /// ```
     pub fn waker(&self) -> Waker {
         let ptr = self.ptr.as_ptr();
