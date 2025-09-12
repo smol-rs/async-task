@@ -72,9 +72,7 @@ thread_local! {
     static QUEUE: RefCell<BinaryHeap<ByDuration>> = RefCell::new(BinaryHeap::new());
 }
 
-fn make_future_fn<'a, F>(
-    future: F,
-) -> impl (FnOnce(&'a DurationMetadata) -> MeasureRuntime<'a, F>) {
+fn make_future_fn<'a, F>(future: F) -> impl FnOnce(&'a DurationMetadata) -> MeasureRuntime<'a, F> {
     move |duration_meta| MeasureRuntime {
         f: future,
         duration: &duration_meta.inner,
