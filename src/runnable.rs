@@ -6,10 +6,8 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 use core::task::Waker;
 
-use alloc::boxed::Box;
-
 use crate::header::Header;
-use crate::raw::RawTask;
+use crate::raw::{allocate_task, RawTask};
 use crate::state::*;
 use crate::Task;
 
@@ -277,6 +275,23 @@ impl Builder<()> {
     }
 }
 
+// Use a macro to brute force inlining to minimize stack copies of potentially
+// large futures.
+macro_rules! spawn_unchecked {
+    ($f:tt, $s:tt, $m:tt, $builder:ident, $schedule:ident, $raw:ident => $future:block) => {{
+        let ptr = allocate_task!($f, $s, $m, $builder, $schedule, $raw => $future);
+
+        #[allow(unused_unsafe)]
+        // SAFTETY: The task was just allocated above.
+        let runnable = unsafe { Runnable::from_raw(ptr) };
+        let task = Task {
+            ptr,
+            _marker: PhantomData,
+        };
+        (runnable, task)
+    }};
+}
+
 impl<M> Builder<M> {
     /// Propagates panics that occur in the task.
     ///
@@ -366,7 +381,9 @@ impl<M> Builder<M> {
         Fut::Output: Send + 'static,
         S: Schedule<M> + Send + Sync + 'static,
     {
-        unsafe { self.spawn_unchecked(future, schedule) }
+        unsafe {
+            spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
+        }
     }
 
     /// Creates a new thread-local task.
@@ -512,24 +529,7 @@ impl<M> Builder<M> {
         S: Schedule<M>,
         M: 'a,
     {
-        // Allocate large futures on the heap.
-        let ptr = if mem::size_of::<Fut>() >= 2048 {
-            let future = |meta| {
-                let future = future(meta);
-                Box::pin(future)
-            };
-
-            RawTask::<_, Fut::Output, S, M>::allocate(future, schedule, self)
-        } else {
-            RawTask::<Fut, Fut::Output, S, M>::allocate(future, schedule, self)
-        };
-
-        let runnable = Runnable::from_raw(ptr);
-        let task = Task {
-            ptr,
-            _marker: PhantomData,
-        };
-        (runnable, task)
+        spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
     }
 }
 
@@ -570,7 +570,8 @@ where
     F::Output: Send + 'static,
     S: Schedule + Send + Sync + 'static,
 {
-    unsafe { spawn_unchecked(future, schedule) }
+    let builder = Builder::new();
+    unsafe { spawn_unchecked!(F, S, (), builder, schedule, raw => { future }) }
 }
 
 /// Creates a new thread-local task.
@@ -650,7 +651,8 @@ where
     F: Future,
     S: Schedule,
 {
-    Builder::new().spawn_unchecked(move |()| future, schedule)
+    let builder = Builder::new();
+    spawn_unchecked!(F, S, (), builder, schedule, raw => { future })
 }
 
 /// A handle to a runnable task.
