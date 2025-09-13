@@ -55,7 +55,7 @@ pub(crate) const REGISTERING: usize = 1 << 6;
 /// Set if the awaiter is being notified.
 ///
 /// This flag is set when notifying the awaiter. If an awaiter is concurrently registered and
-/// notified, whichever side came first will take over the reposibility of resolving the race.
+/// notified, whichever side came first will take over the responsibility of resolving the race.
 pub(crate) const NOTIFYING: usize = 1 << 7;
 
 /// A single reference.

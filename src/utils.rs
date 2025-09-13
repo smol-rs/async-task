@@ -18,22 +18,19 @@ pub(crate) fn abort() -> ! {
     panic!("aborting the process");
 }
 
-#[cfg(feature = "std")]
-pub use std::process::abort;
+pub(crate) struct Bomb;
+
+impl Drop for Bomb {
+    fn drop(&mut self) {
+        abort();
+    }
+}
 
 /// Calls a function and aborts if it panics.
 ///
 /// This is useful in unsafe code where we can't recover from panics.
 #[inline]
 pub(crate) fn abort_on_panic<T>(f: impl FnOnce() -> T) -> T {
-    struct Bomb;
-
-    impl Drop for Bomb {
-        fn drop(&mut self) {
-            abort();
-        }
-    }
-
     let bomb = Bomb;
     let t = f();
     mem::forget(bomb);
