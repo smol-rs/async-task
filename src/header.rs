@@ -1,6 +1,6 @@
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::task::Waker;
+use core::task::{RawWaker, Waker};
 
 #[cfg(not(feature = "portable-atomic"))]
 use core::sync::atomic::AtomicUsize;
@@ -10,12 +10,20 @@ use portable_atomic::AtomicUsize;
 
 use crate::raw::TaskVTable;
 use crate::state::*;
+use crate::utils::abort;
 use crate::utils::abort_on_panic;
 
-/// The header of a task.
-///
-/// This header is stored in memory at the beginning of the heap-allocated task.
-pub(crate) struct Header<M> {
+/// Actions to take upon calling [`Header::drop_waker`].
+pub(crate) enum DropWakerAction {
+    /// Re-schedule the task
+    Schedule,
+    /// Destroy the task.
+    Destroy,
+    /// Do nothing.
+    None,
+}
+
+pub(crate) struct Header {
     /// Current state of the task.
     ///
     /// Contains flags representing the current state and the reference count.
@@ -32,17 +40,12 @@ pub(crate) struct Header<M> {
     /// methods necessary for bookkeeping the heap-allocated task.
     pub(crate) vtable: &'static TaskVTable,
 
-    /// Metadata associated with the task.
-    ///
-    /// This metadata may be provided to the user.
-    pub(crate) metadata: M,
-
     /// Whether or not a panic that occurs in the task should be propagated.
     #[cfg(feature = "std")]
     pub(crate) propagate_panic: bool,
 }
 
-impl<M> Header<M> {
+impl Header {
     /// Notifies the awaiter blocked on this task.
     ///
     /// If the awaiter is the same as the current waker, it will not be notified.
@@ -157,11 +160,69 @@ impl<M> Header<M> {
             abort_on_panic(|| w.wake());
         }
     }
+
+    /// Clones a waker.
+    pub(crate) unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
+        let header = ptr as *const Header;
+
+        // Increment the reference count. With any kind of reference-counted data structure,
+        // relaxed ordering is appropriate when incrementing the counter.
+        let state = (*header).state.fetch_add(REFERENCE, Ordering::Relaxed);
+
+        // If the reference count overflowed, abort.
+        if state > isize::MAX as usize {
+            abort();
+        }
+
+        RawWaker::new(ptr, (*header).vtable.raw_waker_vtable)
+    }
+
+    #[inline(never)]
+    pub(crate) unsafe fn drop_waker(ptr: *const ()) -> DropWakerAction {
+        let header = ptr as *const Header;
+
+        // Decrement the reference count.
+        let new = (*header).state.fetch_sub(REFERENCE, Ordering::AcqRel) - REFERENCE;
+
+        // If this was the last reference to the task and the `Task` has been dropped too,
+        // then we need to decide how to destroy the task.
+        if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
+            if new & (COMPLETED | CLOSED) == 0 {
+                // If the task was not completed nor closed, close it and schedule one more time so
+                // that its future gets dropped by the executor.
+                (*header)
+                    .state
+                    .store(SCHEDULED | CLOSED | REFERENCE, Ordering::Release);
+                DropWakerAction::Schedule
+            } else {
+                // Otherwise, destroy the task right away.
+                DropWakerAction::Destroy
+            }
+        } else {
+            DropWakerAction::None
+        }
+    }
 }
 
-impl<M: fmt::Debug> fmt::Debug for Header<M> {
+// SAFETY: repr(C) is explicitly used here so that casts between `Header` and `HeaderWithMetadata`
+// can be done safely without additional offsets.
+//
+/// The header of a task.
+///
+/// This header is stored in memory at the beginning of the heap-allocated task.
+#[repr(C)]
+pub(crate) struct HeaderWithMetadata<M> {
+    pub(crate) header: Header,
+
+    /// Metadata associated with the task.
+    ///
+    /// This metadata may be provided to the user.
+    pub(crate) metadata: M,
+}
+
+impl<M: fmt::Debug> fmt::Debug for HeaderWithMetadata<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.state.load(Ordering::SeqCst);
+        let state = self.header.state.load(Ordering::SeqCst);
 
         f.debug_struct("Header")
             .field("scheduled", &(state & SCHEDULED != 0))

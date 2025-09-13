@@ -7,6 +7,8 @@ use core::sync::atomic::Ordering;
 use core::task::Waker;
 
 use crate::header::Header;
+use crate::header::HeaderWithMetadata;
+use crate::raw::drop_ref;
 use crate::raw::{allocate_task, RawTask};
 use crate::state::*;
 use crate::Task;
@@ -715,7 +717,7 @@ impl<M> Runnable<M> {
     /// Tasks can be created with a metadata object associated with them; by default, this
     /// is a `()` value. See the [`Builder::metadata()`] method for more information.
     pub fn metadata(&self) -> &M {
-        &self.header().metadata
+        &self.header_with_metadata().metadata
     }
 
     /// Schedules the task.
@@ -742,7 +744,7 @@ impl<M> Runnable<M> {
     /// ```
     pub fn schedule(self) {
         let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
+        let header = ptr as *const Header;
         mem::forget(self);
 
         unsafe {
@@ -780,7 +782,7 @@ impl<M> Runnable<M> {
     /// ```
     pub fn run(self) -> bool {
         let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
+        let header = ptr as *const Header;
         mem::forget(self);
 
         unsafe { ((*header).vtable.run)(ptr) }
@@ -813,17 +815,18 @@ impl<M> Runnable<M> {
     /// # handle.join().unwrap();
     /// ```
     pub fn waker(&self) -> Waker {
-        let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
-
         unsafe {
-            let raw_waker = ((*header).vtable.clone_waker)(ptr);
+            let raw_waker = Header::clone_waker(self.ptr.as_ptr());
             Waker::from_raw(raw_waker)
         }
     }
 
-    fn header(&self) -> &Header<M> {
-        unsafe { &*(self.ptr.as_ptr() as *const Header<M>) }
+    fn header(&self) -> &Header {
+        unsafe { &*(self.ptr.as_ptr() as *const Header) }
+    }
+
+    fn header_with_metadata(&self) -> &HeaderWithMetadata<M> {
+        unsafe { &*(self.ptr.as_ptr() as *const HeaderWithMetadata<M>) }
     }
 
     /// Converts this task into a raw pointer.
@@ -925,7 +928,7 @@ impl<M> Drop for Runnable<M> {
             }
 
             // Drop the future.
-            (header.vtable.drop_future)(ptr);
+            (header.vtable.drop_future)(ptr, header.vtable.layout_info);
 
             // Mark the task as unscheduled.
             let state = header.state.fetch_and(!SCHEDULED, Ordering::AcqRel);
@@ -936,7 +939,7 @@ impl<M> Drop for Runnable<M> {
             }
 
             // Drop the task reference.
-            (header.vtable.drop_ref)(ptr);
+            drop_ref(ptr);
         }
     }
 }
@@ -944,7 +947,7 @@ impl<M> Drop for Runnable<M> {
 impl<M: fmt::Debug> fmt::Debug for Runnable<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr = self.ptr.as_ptr();
-        let header = ptr as *const Header<M>;
+        let header = ptr as *const HeaderWithMetadata<M>;
 
         f.debug_struct("Runnable")
             .field("header", unsafe { &(*header) })
