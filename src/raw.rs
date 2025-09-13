@@ -39,14 +39,13 @@ pub(crate) struct TaskVTable {
     /// The memory layout of the task. This information enables
     /// debuggers to decode raw task memory blobs. Do not remove
     /// the field, even if it appears to be unused.
-    #[allow(unused)]
     pub(crate) layout_info: &'static TaskLayout,
 }
 
 impl TaskVTable {
     /// Returns a pointer to the output inside a task.
     pub(crate) unsafe fn get_output(&self, ptr: *const ()) -> *const () {
-        ptr.byte_add(self.layout_info.offset_r)
+        ptr.add_byte(self.layout_info.offset_r)
     }
 }
 
@@ -209,9 +208,9 @@ where
         unsafe {
             Self {
                 header: ptr as *const HeaderWithMetadata<M>,
-                schedule: ptr.byte_add(Self::TASK_LAYOUT.offset_s) as *const S,
-                future: ptr.byte_add(Self::TASK_LAYOUT.offset_f) as *mut F,
-                output: ptr.byte_add(Self::TASK_LAYOUT.offset_r) as *mut Result<T, Panic>,
+                schedule: ptr.add_byte(Self::TASK_LAYOUT.offset_s) as *const S,
+                future: ptr.add_byte(Self::TASK_LAYOUT.offset_f) as *mut F,
+                output: ptr.add_byte(Self::TASK_LAYOUT.offset_r) as *mut Result<T, Panic>,
             }
         }
     }
@@ -502,7 +501,7 @@ where
 unsafe fn schedule<S: Schedule<M>, M>(ptr: *const (), info: ScheduleInfo) {
     let header = ptr as *const Header;
     let task_layout = (*header).vtable.layout_info;
-    let schedule = ptr.byte_add(task_layout.offset_s) as *mut S;
+    let schedule = ptr.add_byte(task_layout.offset_s) as *mut S;
 
     // If the schedule function has captured variables, create a temporary waker that prevents
     // the task from getting deallocated while the function is being invoked.
@@ -533,7 +532,7 @@ unsafe fn drop_waker(ptr: *const ()) {
 /// Drops the future inside a task.
 #[inline]
 unsafe fn drop_future<F>(ptr: *const (), task_layout: &TaskLayout) {
-    let future_ptr = ptr.byte_add(task_layout.offset_f) as *mut F;
+    let future_ptr = ptr.add_byte(task_layout.offset_f) as *mut F;
 
     // We need a safeguard against panics because the destructor can panic.
     abort_on_panic(|| {
@@ -657,7 +656,7 @@ unsafe fn wake_by_ref<S: Schedule<M>, M>(ptr: *const ()) {
                             abort();
                         }
 
-                        let schedule = ptr.byte_add(task_layout.offset_s) as *mut S;
+                        let schedule = ptr.add_byte(task_layout.offset_s) as *mut S;
 
                         // Schedule the task. There is no need to call `Self::schedule(ptr)`
                         // because the schedule function cannot be destroyed while the waker is
@@ -682,7 +681,7 @@ unsafe fn wake_by_ref<S: Schedule<M>, M>(ptr: *const ()) {
 unsafe fn destroy<S, M>(ptr: *const ()) {
     let header = ptr as *const Header;
     let task_layout = (*header).vtable.layout_info;
-    let schedule = ptr.byte_add(task_layout.offset_s);
+    let schedule = ptr.add_byte(task_layout.offset_s);
 
     // We need a safeguard against panics because destructors can panic.
     abort_on_panic(|| {
@@ -713,5 +712,35 @@ pub(crate) unsafe fn drop_ref(ptr: *const ()) {
     // then destroy the task.
     if new & !(REFERENCE - 1) == 0 && new & TASK == 0 {
         (header.vtable.destroy)(ptr);
+    }
+}
+
+trait PointerPolyfill {
+    // Polyfill for `byte_add`.
+    // TODO: Replace this with `byte_add` once the MSRV should be bumped past 1.75
+    /// Adds an unsigned offset in bytes to a pointer.
+    ///
+    /// `count` is in units of bytes.
+    ///
+    /// This is purely a convenience for casting to a `u8` pointer and
+    /// using [add][pointer::add] on it. See that method for documentation
+    /// and safety requirements.
+    ///
+    /// # Safety
+    /// If any of the following conditions are violated, the result is Undefined Behavior:
+    ///
+    ///  - The offset in bytes, count * size_of::<T>(), computed on mathematical integers
+    ///    (without “wrapping around”), must fit in an isize.
+    ///  - If the computed offset is non-zero, then self must be derived from a pointer to
+    ///    some allocation, and the entire memory range between self and the result must be
+    ///    in bounds of that allocation. In particular, this range must not “wrap around”
+    ///    the edge of the address space.
+    unsafe fn add_byte(self, size: usize) -> Self;
+}
+
+impl<T> PointerPolyfill for *const T {
+    #[inline]
+    unsafe fn add_byte(self, size: usize) -> Self {
+        (self.cast::<u8>().add(size)).cast::<T>()
     }
 }
