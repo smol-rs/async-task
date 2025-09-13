@@ -241,8 +241,7 @@ fn set_detached<T>(ptr: *const ()) -> Option<Result<T, Panic>> {
                         Ok(_) => {
                             // Read the output.
                             output = Some(
-                                ((*header).vtable.get_output(ptr) as *mut Result<T, Panic>)
-                                    .read(),
+                                ((*header).vtable.get_output(ptr) as *mut Result<T, Panic>).read(),
                             );
 
                             // Update the state variable because we're continuing the loop.
