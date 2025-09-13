@@ -216,24 +216,19 @@ where
         }
     }
 
-    fn header<'a>(ptr: *const ()) -> &'a Header {
-        let header = ptr as *const Header;
-        unsafe { &*header }
-    }
-
     /// Runs a task.
     ///
     /// If polling its future panics, the task will be closed and the panic will be propagated into
     /// the caller.
     unsafe fn run(ptr: *const ()) -> bool {
         let raw = Self::from_ptr(ptr);
-        let header = Self::header(ptr);
+        let header = ptr as *const Header;
 
         // Create a context from the raw task pointer and the vtable inside the its header.
         let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(ptr, &Self::RAW_WAKER_VTABLE)));
         let cx = &mut Context::from_waker(&waker);
 
-        let mut state = header.state.load(Ordering::Acquire);
+        let mut state = (*header).state.load(Ordering::Acquire);
 
         // Update the task's state before polling its future.
         loop {
@@ -243,12 +238,12 @@ where
                 drop_future::<F>(ptr, &Self::TASK_LAYOUT);
 
                 // Mark the task as unscheduled.
-                let state = header.state.fetch_and(!SCHEDULED, Ordering::AcqRel);
+                let state = (*header).state.fetch_and(!SCHEDULED, Ordering::AcqRel);
 
                 // Take the awaiter out.
                 let mut awaiter = None;
                 if state & AWAITER != 0 {
-                    awaiter = header.take(None);
+                    awaiter = (*header).take(None);
                 }
 
                 // Drop the task reference.
@@ -262,7 +257,7 @@ where
             }
 
             // Mark the task as unscheduled and running.
-            match header.state.compare_exchange_weak(
+            match (*header).state.compare_exchange_weak(
                 state,
                 (state & !SCHEDULED) | RUNNING,
                 Ordering::AcqRel,
@@ -280,7 +275,7 @@ where
         // Poll the inner future, but surround it with a guard that closes the task in case polling
         // panics.
         // If available, we should also try to catch the panic so that it is propagated correctly.
-        let guard = Guard::<F, T>(raw.header.cast(), &Self::TASK_LAYOUT, PhantomData);
+        let guard = Guard::<F, T>(ptr, &Self::TASK_LAYOUT, PhantomData);
 
         // Panic propagation is not available for no_std.
         #[cfg(not(feature = "std"))]
@@ -289,7 +284,7 @@ where
         #[cfg(feature = "std")]
         let poll = {
             // Check if we should propagate panics.
-            if header.propagate_panic {
+            if (*header).propagate_panic {
                 // Use catch_unwind to catch the panic.
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     <F as Future>::poll(Pin::new_unchecked(&mut *raw.future), cx)
@@ -321,7 +316,7 @@ where
                     };
 
                     // Mark the task as not running and completed.
-                    match header.state.compare_exchange_weak(
+                    match (*header).state.compare_exchange_weak(
                         state,
                         new,
                         Ordering::AcqRel,
@@ -338,7 +333,7 @@ where
                             // Take the awaiter out.
                             let mut awaiter = None;
                             if state & AWAITER != 0 {
-                                awaiter = header.take(None);
+                                awaiter = (*header).take(None);
                             }
 
                             // Drop the task reference.
@@ -375,7 +370,7 @@ where
                     }
 
                     // Mark the task as not running.
-                    match header.state.compare_exchange_weak(
+                    match (*header).state.compare_exchange_weak(
                         state,
                         new,
                         Ordering::AcqRel,
@@ -389,7 +384,7 @@ where
                                 // Take the awaiter out.
                                 let mut awaiter = None;
                                 if state & AWAITER != 0 {
-                                    awaiter = header.take(None);
+                                    awaiter = (*header).take(None);
                                 }
 
                                 // Drop the task reference.
