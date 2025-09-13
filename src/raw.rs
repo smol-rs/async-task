@@ -149,13 +149,13 @@ macro_rules! allocate_task {
         } = $builder;
 
         // Write the header as the first field of the task.
-        (raw.header as *mut HeaderWithMetadata<M>).write(HeaderWithMetadata {
+        ($raw.header as *mut HeaderWithMetadata<$m>).write(HeaderWithMetadata {
             header: Header {
                 #[cfg(not(feature = "portable-atomic"))]
                 state: core::sync::atomic::AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
                 #[cfg(feature = "portable-atomic")]
                 state: portable_atomic::AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
-                awaiter: UnsafeCell::new(None),
+                awaiter: core::cell::UnsafeCell::new(None),
                 vtable: &RawTask::<$f, <$f as Future>::Output, $s, $m>::TASK_VTABLE,
                 #[cfg(feature = "std")]
                 propagate_panic,
