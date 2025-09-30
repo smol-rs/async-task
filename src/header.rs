@@ -15,7 +15,7 @@ use crate::utils::abort_on_panic;
 
 /// Actions to take upon calling [`Header::drop_waker`].
 pub(crate) enum DropWakerAction {
-    /// Re-schedule the task
+    /// Re-schedule the task.
     Schedule,
     /// Destroy the task.
     Destroy,

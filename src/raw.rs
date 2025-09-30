@@ -110,7 +110,7 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
         let align_union = max(layout_f.align(), layout_r.align());
         let layout_union = Layout::from_size_align(size_union, align_union);
 
-        // Compute the layout for `Header` followed `S` and `union { F, T }`.
+        // Compute the layout for `Header` followed by `S` and `union { F, T }`.
         let layout = layout_header;
         let (layout, offset_s) = leap_unwrap!(layout.extend(layout_s));
         let (layout, offset_union) = leap_unwrap!(layout.extend(layout_union));
