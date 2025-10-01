@@ -20,7 +20,7 @@
 //! ```
 //!
 //! A task is created using either [`spawn()`], [`spawn_local()`], or [`spawn_unchecked()`] which
-//! return a [`Runnable`] and a [`Task`]:
+//! returns a [`Runnable`] and a [`Task`]:
 //!
 //! ```
 //! # let (sender, receiver) = flume::unbounded();
