@@ -110,7 +110,7 @@ impl Layout {
     /// This function was adapted from the `Layout::padding_needed_for()`:
     /// https://doc.rust-lang.org/nightly/std/alloc/struct.Layout.html#method.padding_needed_for
     #[inline]
-    pub(crate) const fn padding_needed_for(self, align: usize) -> usize {
+    const fn padding_needed_for(self, align: usize) -> usize {
         let len = self.size();
         let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
         len_rounded_up.wrapping_sub(len)
