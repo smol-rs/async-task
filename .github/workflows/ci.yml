@@ -28,6 +28,10 @@ defaults:
 jobs:
   fmt:
     uses: smol-rs/.github/.github/workflows/fmt.yml@main
+  clippy:
+    uses: smol-rs/.github/.github/workflows/clippy.yml@main
+    with:
+      bench: false # We run clippy using stable rustc, but our benchmarks use #![feature(test)].
   security_audit:
     uses: smol-rs/.github/.github/workflows/security_audit.yml@main
     permissions:
@@ -80,14 +84,6 @@ jobs:
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       - run: cargo hack build --feature-powerset --no-dev-deps --rust-version
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        run: rustup update stable
-      - run: cargo clippy --all-features --tests --examples
 
   miri:
     runs-on: ubuntu-latest
