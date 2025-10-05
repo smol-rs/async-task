@@ -48,7 +48,7 @@ jobs:
         os: [ubuntu-latest]
         rust: [nightly, beta, stable]
     steps:
-      - uses: actions/checkout@v4
+      - uses: taiki-e/checkout-action@v1
       - name: Install Rust
         run: rustup update ${{ matrix.rust }} && rustup default ${{ matrix.rust }}
       - run: rustup target add thumbv7m-none-eabi
@@ -80,7 +80,7 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: taiki-e/checkout-action@v1
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       - run: cargo hack build --feature-powerset --no-dev-deps --rust-version
@@ -88,7 +88,7 @@ jobs:
   miri:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: taiki-e/checkout-action@v1
       - name: Install Rust
         run: rustup toolchain install nightly --component miri && rustup default nightly
       - run: cargo miri test
