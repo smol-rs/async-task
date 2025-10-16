@@ -94,6 +94,5 @@ jobs:
       - run: cargo miri test
         env:
           # -Zmiri-ignore-leaks is needed because we use detached threads in doctests: https://github.com/rust-lang/miri/issues/1371
-          # disable preemption due to https://github.com/rust-lang/rust/issues/55005
-          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-ignore-leaks -Zmiri-preemption-rate=0
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-ignore-leaks
           RUSTFLAGS: ${{ env.RUSTFLAGS }} -Z randomize-layout
