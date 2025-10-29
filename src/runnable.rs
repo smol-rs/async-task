@@ -437,15 +437,6 @@ impl<M> Builder<M> {
         use std::task::{Context, Poll};
         use std::thread::{self, ThreadId};
 
-        #[inline]
-        fn thread_id() -> ThreadId {
-            std::thread_local! {
-                static ID: ThreadId = thread::current().id();
-            }
-            ID.try_with(|id| *id)
-                .unwrap_or_else(|_| thread::current().id())
-        }
-
         struct Checked<F> {
             id: ThreadId,
             inner: ManuallyDrop<F>,
@@ -454,7 +445,7 @@ impl<M> Builder<M> {
         impl<F> Drop for Checked<F> {
             fn drop(&mut self) {
                 assert!(
-                    self.id == thread_id(),
+                    self.id == thread::current().id(),
                     "local task dropped by a thread that didn't spawn it"
                 );
                 unsafe {
@@ -468,7 +459,7 @@ impl<M> Builder<M> {
 
             fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 assert!(
-                    self.id == thread_id(),
+                    self.id == thread::current().id(),
                     "local task polled by a thread that didn't spawn it"
                 );
                 unsafe { self.map_unchecked_mut(|c| &mut *c.inner).poll(cx) }
@@ -480,7 +471,7 @@ impl<M> Builder<M> {
             let future = future(meta);
 
             Checked {
-                id: thread_id(),
+                id: thread::current().id(),
                 inner: ManuallyDrop::new(future),
             }
         };
