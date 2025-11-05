@@ -2,7 +2,10 @@ use async_task::{Builder, Runnable};
 use flume::unbounded;
 use smol::future;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    ptr::NonNull,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 #[test]
 fn metadata_use_case() {
@@ -55,4 +58,44 @@ fn metadata_use_case() {
         t1.await;
         t2.await;
     });
+}
+
+#[test]
+fn metadata_raw() {
+    let (sender, receiver) = unbounded::<NonNull<()>>();
+
+    let future = |counter: &AtomicUsize| {
+        assert_eq!(0, counter.fetch_add(1, Ordering::SeqCst));
+        async {}
+    };
+
+    let schedule = move |runnable: Runnable<AtomicUsize>| {
+        let ptr = runnable.into_raw();
+
+        {
+            let counter: &AtomicUsize = unsafe { Runnable::metadata_raw(ptr).as_ref() };
+            assert_eq!(1, counter.fetch_add(1, Ordering::SeqCst));
+        }
+
+        sender.send(ptr).ok();
+    };
+
+    let (runnable, task) = unsafe {
+        Builder::new()
+            .metadata(AtomicUsize::new(0))
+            .spawn_unchecked(future, schedule)
+    };
+
+    runnable.schedule();
+    let ptr = receiver.recv().unwrap();
+
+    {
+        let counter: &AtomicUsize = unsafe { Runnable::metadata_raw(ptr).as_ref() };
+        assert_eq!(2, counter.fetch_add(1, Ordering::SeqCst));
+    }
+
+    let runnable: Runnable<AtomicUsize> = unsafe { Runnable::from_raw(ptr) };
+    assert_eq!(3, runnable.metadata().fetch_add(1, Ordering::SeqCst));
+
+    assert_eq!(4, task.metadata().load(Ordering::SeqCst));
 }
