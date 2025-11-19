@@ -8,6 +8,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use core::sync::atomic::Ordering;
 
+use crate::alloc_api::{self, Allocator};
 use crate::header::{DropWakerAction, Header, HeaderWithMetadata};
 use crate::runnable::{Schedule, ScheduleInfo};
 use crate::state::*;
@@ -68,10 +69,13 @@ pub(crate) struct TaskLayout {
 
     /// Offset into the task at which the output is stored.
     pub(crate) offset_r: usize,
+
+    /// Offset into the task at which the allocator is stored.
+    pub(crate) offset_a: usize,
 }
 
 /// Raw pointers to the fields inside a task.
-pub(crate) struct RawTask<F, T, S, M> {
+pub(crate) struct RawTask<F, T, S, M, A> {
     /// The task header.
     pub(crate) header: *const HeaderWithMetadata<M>,
 
@@ -83,17 +87,20 @@ pub(crate) struct RawTask<F, T, S, M> {
 
     /// The output of the future.
     pub(crate) output: *mut Result<T, Panic>,
+
+    /// The task allocator.
+    pub(crate) allocator: *const A,
 }
 
-impl<F, T, S, M> Copy for RawTask<F, T, S, M> {}
+impl<F, T, S, M, A> Copy for RawTask<F, T, S, M, A> {}
 
-impl<F, T, S, M> Clone for RawTask<F, T, S, M> {
+impl<F, T, S, M, A> Clone for RawTask<F, T, S, M, A> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<F, T, S, M> RawTask<F, T, S, M> {
+impl<F, T, S, M, A> RawTask<F, T, S, M, A> {
     pub(crate) const TASK_LAYOUT: TaskLayout = Self::eval_task_layout();
 
     /// Computes the memory layout for a task.
@@ -104,6 +111,7 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
         let layout_s = Layout::new::<S>();
         let layout_f = Layout::new::<F>();
         let layout_r = Layout::new::<Result<T, Panic>>();
+        let layout_a = Layout::new::<A>();
 
         // Compute the layout for `union { F, T }`.
         let size_union = max(layout_f.size(), layout_r.size());
@@ -117,11 +125,18 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
         let offset_f = offset_union;
         let offset_r = offset_union;
 
+        let (layout, offset_a) = if layout_a.size() > 0 {
+            leap_unwrap!(layout.extend(layout_a))
+        } else {
+            (layout, layout.size())
+        };
+
         TaskLayout {
             layout: unsafe { layout.into_std() },
             offset_s,
             offset_f,
             offset_r,
+            offset_a,
         }
     }
 }
@@ -133,13 +148,14 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
 /// Use a macro to brute force inlining to minimize stack copies of potentially
 /// large futures.
 macro_rules! allocate_task {
-    ($f:tt, $s:tt, $m:tt, $builder:ident, $schedule:ident, $raw:ident => $future:block) => {{
-        let allocation =
-            alloc::alloc::alloc(RawTask::<$f, <$f as Future>::Output, $s, $m>::TASK_LAYOUT.layout);
+    ($f:tt, $s:tt, $m:tt, $a:tt, $builder:ident, $schedule:ident, $alloc:ident, $raw:ident => $future:block) => {{
         // Allocate enough space for the entire task.
-        let ptr = NonNull::new(allocation as *mut ()).unwrap_or_else(|| crate::utils::abort());
+        let allocation =
+            crate::alloc_api::allocate::<$a>(&$alloc, RawTask::<$f, <$f as Future>::Output, $s, $m, $a>::TASK_LAYOUT.layout);
+        let allocation = allocation.unwrap_or_else(|()| crate::utils::abort());
+        let ptr = allocation.cast::<()>();
 
-        let $raw = RawTask::<$f, <$f as Future>::Output, $s, $m>::from_ptr(ptr.as_ptr());
+        let $raw = RawTask::<$f, <$f as Future>::Output, $s, $m, $a>::from_ptr(ptr.as_ptr());
 
         let crate::Builder {
             metadata,
@@ -155,7 +171,7 @@ macro_rules! allocate_task {
                 #[cfg(feature = "portable-atomic")]
                 state: portable_atomic::AtomicUsize::new(SCHEDULED | TASK | REFERENCE),
                 awaiter: core::cell::UnsafeCell::new(None),
-                vtable: &RawTask::<$f, <$f as Future>::Output, $s, $m>::TASK_VTABLE,
+                vtable: &RawTask::<$f, <$f as Future>::Output, $s, $m, $a>::TASK_VTABLE,
                 #[cfg(feature = "std")]
                 propagate_panic,
             },
@@ -163,7 +179,7 @@ macro_rules! allocate_task {
         });
 
         // Write the schedule function as the third field of the task.
-        ($raw.schedule as *mut S).write($schedule);
+        ($raw.schedule as *mut $s).write($schedule);
 
         // Explicitly avoid using abort_on_panic here to avoid extra stack
         // copies of the future on lower optimization levels.
@@ -174,6 +190,9 @@ macro_rules! allocate_task {
         $raw.future.write($future);
         // (&(*raw.header).metadata)
 
+        // Write the allocator as the fifth field of the task.
+        ($raw.allocator as *mut $a).write($alloc);
+
         mem::forget(bomb);
         ptr
     }};
@@ -181,10 +200,11 @@ macro_rules! allocate_task {
 
 pub(crate) use allocate_task;
 
-impl<F, T, S, M> RawTask<F, T, S, M>
+impl<F, T, S, M, A> RawTask<F, T, S, M, A>
 where
     F: Future<Output = T>,
     S: Schedule<M>,
+    A: Allocator,
 {
     pub(crate) const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Header::clone_waker,
@@ -197,7 +217,7 @@ where
         raw_waker_vtable: &Self::RAW_WAKER_VTABLE,
         schedule: schedule::<S, M>,
         drop_future: drop_future::<F>,
-        destroy: destroy::<S, M>,
+        destroy: destroy::<S, M, A>,
         run: Self::run,
         layout_info: &Self::TASK_LAYOUT,
     };
@@ -211,6 +231,7 @@ where
                 schedule: ptr.add_byte(Self::TASK_LAYOUT.offset_s) as *const S,
                 future: ptr.add_byte(Self::TASK_LAYOUT.offset_f) as *mut F,
                 output: ptr.add_byte(Self::TASK_LAYOUT.offset_r) as *mut Result<T, Panic>,
+                allocator: ptr.add_byte(Self::TASK_LAYOUT.offset_a) as *const A,
             }
         }
     }
@@ -678,10 +699,13 @@ unsafe fn wake_by_ref<S: Schedule<M>, M>(ptr: *const ()) {
 /// The schedule function will be dropped, and the task will then get deallocated.
 /// The task must be closed before this function is called.
 #[inline]
-unsafe fn destroy<S, M>(ptr: *const ()) {
+unsafe fn destroy<S, M, A: Allocator>(ptr: *const ()) {
     let header = ptr as *const Header;
     let task_layout = (*header).vtable.layout_info;
     let schedule = ptr.add_byte(task_layout.offset_s);
+
+    let allocator = ptr.add_byte(task_layout.offset_a);
+    let allocator = core::ptr::read(allocator as *const A);
 
     // We need a safeguard against panics because destructors can panic.
     abort_on_panic(|| {
@@ -690,10 +714,14 @@ unsafe fn destroy<S, M>(ptr: *const ()) {
 
         // Drop the schedule function.
         (schedule as *mut S).drop_in_place();
+
+        // Don't drop allocator here, it's already moved out by ptr::read
     });
 
     // Finally, deallocate the memory reserved by the task.
-    alloc::alloc::dealloc(ptr as *mut u8, task_layout.layout);
+    alloc_api::deallocate(&allocator, ptr as *mut u8, task_layout.layout);
+
+    // The allocator is dropped when it goes out of scope
 }
 
 /// Drops a task reference (`Runnable` or `Waker`).

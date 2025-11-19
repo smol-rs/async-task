@@ -6,12 +6,16 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 use core::task::Waker;
 
+use crate::alloc_api::Global;
 use crate::header::Header;
 use crate::header::HeaderWithMetadata;
 use crate::raw::drop_ref;
 use crate::raw::{allocate_task, RawTask};
 use crate::state::*;
 use crate::Task;
+
+#[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
+use crate::alloc_api::Allocator;
 
 mod sealed {
     use super::*;
@@ -280,8 +284,8 @@ impl Builder<()> {
 // Use a macro to brute force inlining to minimize stack copies of potentially
 // large futures.
 macro_rules! spawn_unchecked {
-    ($f:tt, $s:tt, $m:tt, $builder:ident, $schedule:ident, $raw:ident => $future:block) => {{
-        let ptr = allocate_task!($f, $s, $m, $builder, $schedule, $raw => $future);
+    ($f:tt, $s:tt, $m:tt, $a:tt, $builder:ident, $schedule:ident, $alloc:ident, $raw:ident => $future:block) => {{
+        let ptr = allocate_task!($f, $s, $m, $a, $builder, $schedule, $alloc, $raw => $future);
 
         #[allow(unused_unsafe)]
         // SAFTETY: The task was just allocated above.
@@ -384,7 +388,32 @@ impl<M> Builder<M> {
         S: Schedule<M> + Send + Sync + 'static,
     {
         unsafe {
-            spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
+            spawn_unchecked!(Fut, S, M, Global, self, schedule, Global, raw => { future(&(*raw.header).metadata) })
+        }
+    }
+
+    /// Creates a new task with the provided allocator.
+    ///
+    /// This function is the same as [`spawn()`], except it allocates memory for a task using the provided [`Allocator`].
+    ///
+    /// This function is only available when the `allocator_api` or `allocator-api2` feature is enabled.
+    ///
+    #[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
+    pub fn spawn_in<F, Fut, S, A>(
+        self,
+        future: F,
+        schedule: S,
+        alloc: A,
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
+    where
+        F: FnOnce(&M) -> Fut,
+        Fut: Future + Send + 'static,
+        Fut::Output: Send + 'static,
+        S: Schedule<M> + Send + Sync + 'static,
+        A: Allocator + Send + Sync + 'static,
+    {
+        unsafe {
+            spawn_unchecked!(Fut, S, M, A, self, schedule, alloc, raw => { future(&(*raw.header).metadata) })
         }
     }
 
@@ -432,60 +461,53 @@ impl<M> Builder<M> {
         Fut::Output: 'static,
         S: Schedule<M> + Send + Sync + 'static,
     {
-        use std::mem::ManuallyDrop;
-        use std::pin::Pin;
-        use std::task::{Context, Poll};
-        use std::thread::{self, ThreadId};
-
-        #[inline]
-        fn thread_id() -> ThreadId {
-            std::thread_local! {
-                static ID: ThreadId = thread::current().id();
-            }
-            ID.try_with(|id| *id)
-                .unwrap_or_else(|_| thread::current().id())
-        }
-
-        struct Checked<F> {
-            id: ThreadId,
-            inner: ManuallyDrop<F>,
-        }
-
-        impl<F> Drop for Checked<F> {
-            fn drop(&mut self) {
-                assert!(
-                    self.id == thread_id(),
-                    "local task dropped by a thread that didn't spawn it"
-                );
-                unsafe {
-                    ManuallyDrop::drop(&mut self.inner);
-                }
-            }
-        }
-
-        impl<F: Future> Future for Checked<F> {
-            type Output = F::Output;
-
-            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                assert!(
-                    self.id == thread_id(),
-                    "local task polled by a thread that didn't spawn it"
-                );
-                unsafe { self.map_unchecked_mut(|c| &mut *c.inner).poll(cx) }
-            }
-        }
-
         // Wrap the future into one that checks which thread it's on.
         let future = move |meta| {
             let future = future(meta);
 
-            Checked {
-                id: thread_id(),
-                inner: ManuallyDrop::new(future),
+            local::Checked {
+                id: local::thread_id(),
+                inner: std::mem::ManuallyDrop::new(future),
             }
         };
 
         unsafe { self.spawn_unchecked(future, schedule) }
+    }
+
+    /// Creates a new thread-local task with the provided allocator.
+    ///
+    /// This function is the same as [`spawn_local()`], except it allocates memory for a task using the provided [`Allocator`].
+    ///
+    /// This function is only available when the `std` feature and either `allocator_api` or `allocator-api2` are enabled.
+    ///
+    #[cfg(all(
+        feature = "std",
+        any(feature = "allocator_api", feature = "allocator-api2")
+    ))]
+    pub fn spawn_local_in<F, Fut, S, A>(
+        self,
+        future: F,
+        schedule: S,
+        alloc: A,
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
+    where
+        F: FnOnce(&M) -> Fut,
+        Fut: Future + 'static,
+        Fut::Output: 'static,
+        S: Schedule<M> + Send + Sync + 'static,
+        A: Allocator + 'static,
+    {
+        // Wrap the future into one that checks which thread it's on.
+        let future = move |meta| {
+            let future = future(meta);
+
+            local::Checked {
+                id: local::thread_id(),
+                inner: std::mem::ManuallyDrop::new(future),
+            }
+        };
+
+        unsafe { self.spawn_unchecked_in(future, schedule, alloc) }
     }
 
     /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
@@ -531,7 +553,44 @@ impl<M> Builder<M> {
         S: Schedule<M>,
         M: 'a,
     {
-        spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
+        spawn_unchecked!(Fut, S, M, Global, self, schedule, Global, raw => { future(&(*raw.header).metadata) })
+    }
+
+    /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds with the provided allocator.
+    ///
+    /// This function is the same as [`spawn_unchecked()`], except it allocates memory for a task using the provided [`Allocator`].
+    ///
+    /// This function is only available when the `allocator_api` or `allocator-api2` feature is enabled.
+    ///
+    /// # Safety
+    ///
+    /// - If `Fut` is not [`Send`], its [`Runnable`] must be used and dropped on the original
+    ///   thread.
+    /// - If `Fut` is not `'static`, borrowed non-metadata variables must outlive its [`Runnable`].
+    /// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
+    ///   must be used and dropped on the original thread.
+    /// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the
+    ///   [`Runnable`]'s [`Waker`].
+    /// - If `alloc` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
+    ///   must be used and dropped on the original thread.
+    /// - If `alloc` is not `'static`, borrowed variables must outlive all instances of the
+    ///   [`Runnable`]'s [`Waker`].
+    ///
+    #[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
+    pub unsafe fn spawn_unchecked_in<'a, F, Fut, S, A>(
+        self,
+        future: F,
+        schedule: S,
+        alloc: A,
+    ) -> (Runnable<M>, Task<Fut::Output, M>)
+    where
+        F: FnOnce(&'a M) -> Fut,
+        Fut: Future + 'a,
+        S: Schedule<M>,
+        M: 'a,
+        A: Allocator,
+    {
+        spawn_unchecked!(Fut, S, M, A, self, schedule, alloc, raw => { future(&(*raw.header).metadata) })
     }
 }
 
@@ -573,7 +632,25 @@ where
     S: Schedule + Send + Sync + 'static,
 {
     let builder = Builder::new();
-    unsafe { spawn_unchecked!(F, S, (), builder, schedule, raw => { future }) }
+    unsafe { spawn_unchecked!(F, S, (), Global, builder, schedule, Global, raw => { future }) }
+}
+
+/// Creates a new task with the provided allocator.
+///
+/// This function is the same as [`spawn()`], except it allocates memory for a task using the provided [`Allocator`].
+///
+/// This function is only available when the `allocator_api` or `allocator-api2` feature is enabled.
+///
+#[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
+pub fn spawn_in<F, S, A>(future: F, schedule: S, alloc: A) -> (Runnable, Task<F::Output>)
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+    S: Schedule + Send + Sync + 'static,
+    A: Allocator + Send + Sync + 'static,
+{
+    let builder = Builder::new();
+    unsafe { spawn_unchecked!(F, S, (), A, builder, schedule, alloc, raw => { future }) }
 }
 
 /// Creates a new thread-local task.
@@ -618,6 +695,24 @@ where
     Builder::new().spawn_local(move |()| future, schedule)
 }
 
+/// Creates a new thread-local task with the provided allocator.
+///
+/// This function is only available when the `std` feature and either `allocator_api` or `allocator-api2` are enabled.
+///
+#[cfg(all(
+    feature = "std",
+    any(feature = "allocator_api", feature = "allocator-api2")
+))]
+pub fn spawn_local_in<F, S, A>(future: F, schedule: S, alloc: A) -> (Runnable, Task<F::Output>)
+where
+    F: Future + 'static,
+    F::Output: 'static,
+    S: Schedule + Send + Sync + 'static,
+    A: Allocator + 'static,
+{
+    Builder::new().spawn_local_in(move |()| future, schedule, alloc)
+}
+
 /// Creates a new task without [`Send`], [`Sync`], and `'static` bounds.
 ///
 /// This function is same as [`spawn()`], except it does not require [`Send`], [`Sync`], and
@@ -654,7 +749,89 @@ where
     S: Schedule,
 {
     let builder = Builder::new();
-    spawn_unchecked!(F, S, (), builder, schedule, raw => { future })
+    spawn_unchecked!(F, S, (), Global, builder, schedule, Global, raw => { future })
+}
+
+/// Creates a new task with the provided allocator.
+///
+/// This function is the same as [`spawn_unchecked()`], except it allocates memory for a task using the provided [`Allocator`].
+///
+/// This function is only available when the `allocator_api` or `allocator-api2` feature is enabled.
+///
+/// # Safety
+///
+/// - If `future` is not [`Send`], its [`Runnable`] must be used and dropped on the original
+///   thread.
+/// - If `future` is not `'static`, borrowed variables must outlive its [`Runnable`].
+/// - If `schedule` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
+///   must be used and dropped on the original thread.
+/// - If `schedule` is not `'static`, borrowed variables must outlive all instances of the
+///   [`Runnable`]'s [`Waker`].
+/// - If `alloc` is not [`Send`] and [`Sync`], all instances of the [`Runnable`]'s [`Waker`]
+///   must be used and dropped on the original thread.
+/// - If `alloc` is not `'static`, borrowed variables must outlive all instances of the
+///   [`Runnable`]'s [`Waker`].
+///
+#[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
+pub unsafe fn spawn_unchecked_in<F, S, A>(
+    future: F,
+    schedule: S,
+    alloc: A,
+) -> (Runnable, Task<F::Output>)
+where
+    F: Future,
+    S: Schedule,
+    A: Allocator,
+{
+    let builder = Builder::new();
+    spawn_unchecked!(F, S, (), A, builder, schedule, alloc, raw => { future })
+}
+
+#[cfg(feature = "std")]
+mod local {
+    use core::future::Future;
+    use std::mem::ManuallyDrop;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::thread::{self, ThreadId};
+
+    #[inline]
+    pub(super) fn thread_id() -> ThreadId {
+        std::thread_local! {
+            static ID: ThreadId = thread::current().id();
+        }
+        ID.try_with(|id| *id)
+            .unwrap_or_else(|_| thread::current().id())
+    }
+
+    pub(super) struct Checked<F> {
+        pub(super) id: ThreadId,
+        pub(super) inner: ManuallyDrop<F>,
+    }
+
+    impl<F> Drop for Checked<F> {
+        fn drop(&mut self) {
+            assert!(
+                self.id == thread_id(),
+                "local task dropped by a thread that didn't spawn it"
+            );
+            unsafe {
+                ManuallyDrop::drop(&mut self.inner);
+            }
+        }
+    }
+
+    impl<F: Future> Future for Checked<F> {
+        type Output = F::Output;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            assert!(
+                self.id == thread_id(),
+                "local task polled by a thread that didn't spawn it"
+            );
+            unsafe { self.map_unchecked_mut(|c| &mut *c.inner).poll(cx) }
+        }
+    }
 }
 
 /// A handle to a runnable task.
