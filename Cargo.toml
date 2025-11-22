@@ -15,7 +15,7 @@ categories = ["asynchronous", "concurrency", "no-std"]
 exclude = ["/.*"]
 
 [features]
-default = ["std", "allocator-api2"]
+default = ["std"]
 allocator_api = []
 std = []
 
