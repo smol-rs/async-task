@@ -17,7 +17,6 @@ exclude = ["/.*"]
 [features]
 default = ["std", "allocator-api2"]
 allocator_api = []
-allocator-api2 = ["dep:allocator-api2"]
 std = []
 
 [dependencies]
