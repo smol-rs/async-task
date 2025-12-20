@@ -101,7 +101,7 @@ impl<T, M> Task<T, M> {
     /// # Examples
     ///
     /// ```
-    /// # if cfg!(miri) { return; } // Miri does not support epoll
+    /// # if cfg!(miri) && !cfg!(target_os = "linux") { return; } // Miri only supports threaded nonblocking logic on linux
     /// use smol::{future, Executor, Timer};
     /// use std::thread;
     /// use std::time::Duration;
@@ -513,7 +513,7 @@ impl<T, M> FallibleTask<T, M> {
     /// # Examples
     ///
     /// ```
-    /// # if cfg!(miri) { return; } // Miri does not support epoll
+    /// # if cfg!(miri) && !cfg!(target_os = "linux") { return; } // Miri only supports threaded nonblocking logic on linux
     /// use smol::{future, Executor, Timer};
     /// use std::thread;
     /// use std::time::Duration;
