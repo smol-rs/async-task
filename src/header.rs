@@ -9,9 +9,11 @@ use core::sync::atomic::Ordering;
 use portable_atomic::AtomicUsize;
 
 use crate::raw::TaskVTable;
-use crate::state::*;
-use crate::utils::abort;
-use crate::utils::abort_on_panic;
+use crate::{
+    state::*,
+    utils::{abort, abort_on_panic},
+    Runnable, ScheduleInfo,
+};
 
 /// Actions to take upon calling [`Header::drop_waker`].
 pub(crate) enum DropWakerAction {
@@ -40,6 +42,7 @@ pub(crate) struct Header {
     /// methods necessary for bookkeeping the heap-allocated task.
     pub(crate) vtable: &'static TaskVTable,
 
+    pub(crate) schedule: fn(Runnable<M>, ScheduleInfo),
     /// Whether or not a panic that occurs in the task should be propagated.
     #[cfg(feature = "std")]
     pub(crate) propagate_panic: bool,

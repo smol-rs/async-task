@@ -9,7 +9,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use core::sync::atomic::Ordering;
 
 use crate::header::{DropWakerAction, Header, HeaderWithMetadata};
-use crate::runnable::{Schedule, ScheduleInfo};
+use crate::runnable::ScheduleInfo;
 use crate::state::*;
 use crate::utils::{abort, abort_on_panic, max, Layout};
 use crate::Runnable;
@@ -60,9 +60,6 @@ pub(crate) struct TaskLayout {
     /// Memory layout of the whole task.
     pub(crate) layout: StdLayout,
 
-    /// Offset into the task at which the schedule function is stored.
-    pub(crate) offset_s: usize,
-
     /// Offset into the task at which the future is stored.
     pub(crate) offset_f: usize,
 
@@ -71,12 +68,9 @@ pub(crate) struct TaskLayout {
 }
 
 /// Raw pointers to the fields inside a task.
-pub(crate) struct RawTask<F, T, S, M> {
+pub(crate) struct RawTask<F, T, M> {
     /// The task header.
     pub(crate) header: *const HeaderWithMetadata<M>,
-
-    /// The schedule function.
-    pub(crate) schedule: *const S,
 
     /// The future.
     pub(crate) future: *mut F,
@@ -85,15 +79,15 @@ pub(crate) struct RawTask<F, T, S, M> {
     pub(crate) output: *mut Result<T, Panic>,
 }
 
-impl<F, T, S, M> Copy for RawTask<F, T, S, M> {}
+impl<F, T, M> Copy for RawTask<F, T, M> {}
 
-impl<F, T, S, M> Clone for RawTask<F, T, S, M> {
+impl<F, T, M> Clone for RawTask<F, T, M> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<F, T, S, M> RawTask<F, T, S, M> {
+impl<F, T, M> RawTask<F, T, M> {
     pub(crate) const TASK_LAYOUT: TaskLayout = Self::eval_task_layout();
 
     /// Computes the memory layout for a task.
@@ -101,7 +95,6 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
     const fn eval_task_layout() -> TaskLayout {
         // Compute the layouts for `Header`, `S`, `F`, and `T`.
         let layout_header = Layout::new::<HeaderWithMetadata<M>>();
-        let layout_s = Layout::new::<S>();
         let layout_f = Layout::new::<F>();
         let layout_r = Layout::new::<Result<T, Panic>>();
 
@@ -112,14 +105,12 @@ impl<F, T, S, M> RawTask<F, T, S, M> {
 
         // Compute the layout for `Header` followed by `S` and `union { F, T }`.
         let layout = layout_header;
-        let (layout, offset_s) = leap_unwrap!(layout.extend(layout_s));
         let (layout, offset_union) = leap_unwrap!(layout.extend(layout_union));
         let offset_f = offset_union;
         let offset_r = offset_union;
 
         TaskLayout {
             layout: unsafe { layout.into_std() },
-            offset_s,
             offset_f,
             offset_r,
         }
@@ -181,10 +172,9 @@ macro_rules! allocate_task {
 
 pub(crate) use allocate_task;
 
-impl<F, T, S, M> RawTask<F, T, S, M>
+impl<F, T, M> RawTask<F, T, M>
 where
     F: Future<Output = T>,
-    S: Schedule<M>,
 {
     pub(crate) const RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Header::clone_waker,
@@ -207,10 +197,9 @@ where
     pub(crate) fn from_ptr(ptr: *const ()) -> Self {
         unsafe {
             Self {
-                header: ptr as *const HeaderWithMetadata<M>,
-                schedule: ptr.add_byte(Self::TASK_LAYOUT.offset_s) as *const S,
-                future: ptr.add_byte(Self::TASK_LAYOUT.offset_f) as *mut F,
-                output: ptr.add_byte(Self::TASK_LAYOUT.offset_r) as *mut Result<T, Panic>,
+                header: p as *const Header<M>,
+                future: p.add(task_layout.offset_f) as *mut F,
+                output: p.add(task_layout.offset_r) as *mut Result<T, Panic>,
             }
         }
     }
