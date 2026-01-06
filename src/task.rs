@@ -54,7 +54,7 @@ pub struct Task<T, M = ()> {
     pub(crate) _marker: PhantomData<(T, M)>,
 }
 
-unsafe impl<T: Send, M> Send for Task<T, M> {}
+unsafe impl<T: Send, M: Send> Send for Task<T, M> {}
 unsafe impl<T, M: Sync> Sync for Task<T, M> {}
 
 impl<T, M> Unpin for Task<T, M> {}

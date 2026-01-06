@@ -718,7 +718,10 @@ impl<M> Runnable<M> {
     ///
     /// Tasks can be created with a metadata object associated with them; by default, this
     /// is a `()` value. See the [`Builder::metadata()`] method for more information.
-    pub fn metadata(&self) -> &M {
+    pub fn metadata(&self) -> &M
+    where
+        M: Sync,
+    {
         &self.header_with_metadata().metadata
     }
 
