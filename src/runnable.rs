@@ -8,7 +8,7 @@ use core::task::Waker;
 
 use crate::header::Header;
 use crate::header::HeaderWithMetadata;
-use crate::raw::drop_ref;
+use crate::raw::drop_runnable;
 use crate::raw::{allocate_task, RawTask};
 use crate::state::*;
 use crate::Task;
@@ -378,6 +378,7 @@ impl<M> Builder<M> {
     /// ```
     pub fn spawn<F, Fut, S>(self, future: F, schedule: S) -> (Runnable<M>, Task<Fut::Output, M>)
     where
+        M: Send + 'static,
         F: FnOnce(&M) -> Fut,
         Fut: Future + Send + 'static,
         Fut::Output: Send + 'static,
@@ -427,6 +428,7 @@ impl<M> Builder<M> {
         schedule: S,
     ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
+        M: 'static,
         F: FnOnce(&M) -> Fut,
         Fut: Future + 'static,
         Fut::Output: 'static,
@@ -526,10 +528,10 @@ impl<M> Builder<M> {
         schedule: S,
     ) -> (Runnable<M>, Task<Fut::Output, M>)
     where
+        M: 'a,
         F: FnOnce(&'a M) -> Fut,
         Fut: Future + 'a,
         S: Schedule<M>,
-        M: 'a,
     {
         spawn_unchecked!(Fut, S, M, self, schedule, raw => { future(&(*raw.header).metadata) })
     }
@@ -703,8 +705,8 @@ pub struct Runnable<M = ()> {
     pub(crate) _marker: PhantomData<M>,
 }
 
-unsafe impl<M: Send + Sync> Send for Runnable<M> {}
-unsafe impl<M: Send + Sync> Sync for Runnable<M> {}
+unsafe impl<M> Send for Runnable<M> {}
+unsafe impl<M: Sync> Sync for Runnable<M> {}
 
 #[cfg(feature = "std")]
 impl<M> std::panic::UnwindSafe for Runnable<M> {}
@@ -716,7 +718,10 @@ impl<M> Runnable<M> {
     ///
     /// Tasks can be created with a metadata object associated with them; by default, this
     /// is a `()` value. See the [`Builder::metadata()`] method for more information.
-    pub fn metadata(&self) -> &M {
+    pub fn metadata(&self) -> &M
+    where
+        M: Sync,
+    {
         &self.header_with_metadata().metadata
     }
 
@@ -938,8 +943,7 @@ impl<M> Drop for Runnable<M> {
                 (*header).notify(None);
             }
 
-            // Drop the task reference.
-            drop_ref(ptr);
+            drop_runnable::<M>(state, ptr);
         }
     }
 }
