@@ -145,6 +145,7 @@ macro_rules! allocate_task {
             metadata,
             #[cfg(feature = "std")]
             propagate_panic,
+            ..
         } = $builder;
 
         // Write the header as the first field of the task.
