@@ -112,6 +112,9 @@ mod state;
 mod task;
 mod utils;
 
+#[cfg(feature = "std")]
+mod task_local;
+
 pub use crate::runnable::{
     spawn, spawn_unchecked, Builder, Runnable, Schedule, ScheduleInfo, WithInfo,
 };
