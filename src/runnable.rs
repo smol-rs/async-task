@@ -284,7 +284,7 @@ macro_rules! spawn_unchecked {
         let ptr = allocate_task!($f, $s, $m, $builder, $schedule, $raw => $future);
 
         #[allow(unused_unsafe)]
-        // SAFTETY: The task was just allocated above.
+        // SAFETY: The task was just allocated above.
         let runnable = unsafe { Runnable::from_raw(ptr) };
         let task = Task {
             ptr,
