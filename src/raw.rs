@@ -30,6 +30,9 @@ pub(crate) struct TaskVTable {
     /// Drops the future inside the task.
     pub(crate) drop_future: unsafe fn(*const (), &TaskLayout),
 
+    /// Drops the metadata associated with the task.
+    pub(crate) drop_metadata: unsafe fn(*const ()),
+
     /// Destroys the task.
     pub(crate) destroy: unsafe fn(*const ()),
 
@@ -159,7 +162,7 @@ macro_rules! allocate_task {
                 #[cfg(feature = "std")]
                 propagate_panic,
             },
-            metadata,
+            metadata: core::mem::ManuallyDrop::new(metadata),
         });
 
         // Write the schedule function as the third field of the task.
@@ -198,6 +201,7 @@ where
         schedule: schedule::<S, M>,
         drop_future: drop_future::<F>,
         destroy: destroy::<S, M>,
+        drop_metadata: drop_metadata::<M>,
         run: Self::run,
         layout_info: &Self::TASK_LAYOUT,
     };
@@ -245,8 +249,7 @@ where
                     awaiter = (*header).take(None);
                 }
 
-                // Drop the task reference.
-                drop_ref(ptr);
+                drop_runnable::<M>(state, ptr);
 
                 // Notify the awaiter that the future has been dropped.
                 if let Some(w) = awaiter {
@@ -335,8 +338,7 @@ where
                                 awaiter = (*header).take(None);
                             }
 
-                            // Drop the task reference.
-                            drop_ref(ptr);
+                            drop_runnable::<M>(state, ptr);
 
                             // Notify the awaiter that the future has been dropped.
                             if let Some(w) = awaiter {
@@ -386,8 +388,7 @@ where
                                     awaiter = (*header).take(None);
                                 }
 
-                                // Drop the task reference.
-                                drop_ref(ptr);
+                                drop_runnable::<M>(state, ptr);
 
                                 // Notify the awaiter that the future has been dropped.
                                 if let Some(w) = awaiter {
@@ -451,6 +452,12 @@ where
                         awaiter = header.take(None);
                     }
 
+                    // If the `Task` has been dropped/detached already
+                    // drop the metadata as `Runnable` won't be accessible anymore.
+                    if state & TASK == 0 {
+                        (header.vtable.drop_metadata)(ptr);
+                    }
+
                     // Drop the task reference.
                     drop_ref(ptr);
 
@@ -476,6 +483,12 @@ where
                         let mut awaiter = None;
                         if state & AWAITER != 0 {
                             awaiter = header.take(None);
+                        }
+
+                        // If the `Task` has been dropped/detached already
+                        // drop the metadata as `Runnable` won't be accessible anymore.
+                        if state & TASK == 0 {
+                            (header.vtable.drop_metadata)(ptr);
                         }
 
                         // Drop the task reference.
@@ -673,10 +686,46 @@ unsafe fn wake_by_ref<S: Schedule<M>, M>(ptr: *const ()) {
     }
 }
 
+/// Drop the Runnable
+///
+/// This is a helper function that we call whenever we are dropping
+/// task reference (as Runnable) and the task is already completed/closed.
+#[inline]
+pub(crate) unsafe fn drop_runnable<M>(state: usize, ptr: *const ()) {
+    // If the `Task` has been dropped/detached already
+    // drop the metadata as we are dropping `Runnable` now.
+    // Also since task is closed, we are sure that `Runnable` won't
+    // be accessible anymore.
+    if state & TASK == 0 {
+        drop_metadata::<M>(ptr);
+    }
+
+    // Drop the task reference.
+    drop_ref(ptr);
+}
+
+/// Drop the Task's metadata only
+///
+/// The task must be closed before this function is called. Also,
+/// we need to make sure that both Runnable and Task are dropped.
+#[inline]
+pub(crate) unsafe fn drop_metadata<M>(ptr: *const ()) {
+    // We need a safeguard against panics because destructors can panic.
+    abort_on_panic(|| {
+        ManuallyDrop::drop(
+            &mut (ptr as *mut HeaderWithMetadata<M>)
+                .as_mut()
+                .unwrap()
+                .metadata,
+        )
+    });
+}
+
 /// Cleans up task's resources and deallocates it.
 ///
 /// The schedule function will be dropped, and the task will then get deallocated.
 /// The task must be closed before this function is called.
+/// Also ensure that [`drop_metadata`] has been called before calling this.
 #[inline]
 unsafe fn destroy<S, M>(ptr: *const ()) {
     let header = ptr as *const Header;
@@ -685,7 +734,7 @@ unsafe fn destroy<S, M>(ptr: *const ()) {
 
     // We need a safeguard against panics because destructors can panic.
     abort_on_panic(|| {
-        // Drop the header along with the metadata.
+        // Drop the header along without dropping metadata.
         (ptr as *mut HeaderWithMetadata<M>).drop_in_place();
 
         // Drop the schedule function.
