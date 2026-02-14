@@ -31,6 +31,10 @@ pub struct Builder<M> {
     /// Whether or not a panic that occurs in the task should be propagated.
     #[cfg(feature = "std")]
     pub(crate) propagate_panic: bool,
+
+    /// Whether or not we should allocate space for task local variables.
+    #[cfg(feature = "std")]
+    pub(crate) task_locals: bool,
 }
 
 impl<M: Default> Default for Builder<M> {
@@ -186,6 +190,8 @@ impl Builder<()> {
             metadata: (),
             #[cfg(feature = "std")]
             propagate_panic: false,
+            #[cfg(feature = "std")]
+            task_locals: false,
         }
     }
 
@@ -273,6 +279,8 @@ impl Builder<()> {
             metadata,
             #[cfg(feature = "std")]
             propagate_panic: self.propagate_panic,
+            #[cfg(feature = "std")]
+            task_locals: self.task_locals,
         }
     }
 }
@@ -281,7 +289,15 @@ impl Builder<()> {
 // large futures.
 macro_rules! spawn_unchecked {
     ($f:tt, $s:tt, $m:tt, $builder:ident, $schedule:ident, $raw:ident => $future:block) => {{
+        #[cfg(not(feature = "std"))]
         let ptr = allocate_task!($f, $s, $m, $builder, $schedule, $raw => $future);
+
+        #[cfg(feature = "std")]
+        let ptr = if ($builder).task_locals {
+            allocate_task!($f, $s, $m, $builder, $schedule, $raw => { crate::task_local::task_local($future) })
+        } else {
+            allocate_task!($f, $s, $m, $builder, $schedule, $raw => $future)
+        };
 
         #[allow(unused_unsafe)]
         // SAFETY: The task was just allocated above.
@@ -340,6 +356,20 @@ impl<M> Builder<M> {
         Builder {
             metadata: self.metadata,
             propagate_panic,
+            task_locals: self.task_locals,
+        }
+    }
+
+    /// Allocates task-local variables for this task.
+    ///
+    /// TODO: Explain the implications.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn task_locals(self, task_locals: bool) -> Self {
+        Self {
+            propagate_panic: self.propagate_panic,
+            metadata: self.metadata,
+            task_locals,
         }
     }
 
