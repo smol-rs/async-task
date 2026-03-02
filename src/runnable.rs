@@ -720,6 +720,32 @@ impl<M> Runnable<M> {
         &self.header_with_metadata().metadata
     }
 
+    /// Returns `true` if the [`Task`] handle has been dropped or cancelled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // A function that schedules the task when it gets woken up.
+    /// let (s, r) = flume::unbounded();
+    /// let schedule = move |runnable| s.send(runnable).unwrap();
+    ///
+    /// // Create a task with a simple future and the schedule function.
+    /// let (runnable, task) = async_task::spawn(async { 1 + 2 }, schedule);
+    ///
+    /// // The task is not cancelled initially.
+    /// assert!(!runnable.is_cancelled());
+    ///
+    /// // Drop the `Task` handle to cancel the task.
+    /// drop(task);
+    ///
+    /// // The task is now cancelled.
+    /// assert!(runnable.is_cancelled());
+    /// # runnable.run();
+    /// ```
+    pub fn is_cancelled(&self) -> bool {
+        self.header().state.load(Ordering::Acquire) & CLOSED != 0
+    }
+
     /// Schedules the task.
     ///
     /// This is a convenience method that passes the [`Runnable`] to the schedule function.
