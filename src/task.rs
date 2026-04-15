@@ -219,7 +219,7 @@ fn set_detached<T>(ptr: *const ()) -> Option<Result<T, Panic>> {
         let mut output = None;
 
         // Optimistically assume the `Task` is being detached just after creating the task.
-        // This is a common case so if the `Task` is datached, the overhead of it is only one
+        // This is a common case so if the `Task` is detached, the overhead of it is only one
         // compare-exchange operation.
         if let Err(mut state) = (*header).state.compare_exchange_weak(
             SCHEDULED | TASK | REFERENCE,
