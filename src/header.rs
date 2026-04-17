@@ -1,5 +1,6 @@
 use core::cell::UnsafeCell;
 use core::fmt;
+use core::mem::ManuallyDrop;
 use core::task::{RawWaker, Waker};
 
 #[cfg(not(feature = "portable-atomic"))]
@@ -217,7 +218,10 @@ pub(crate) struct HeaderWithMetadata<M> {
     /// Metadata associated with the task.
     ///
     /// This metadata may be provided to the user.
-    pub(crate) metadata: M,
+    ///
+    /// This metadata will always be manually dropped,
+    /// whenever `Runnable` and `Task` are both dropped.
+    pub(crate) metadata: ManuallyDrop<M>,
 }
 
 impl<M: fmt::Debug> fmt::Debug for HeaderWithMetadata<M> {
