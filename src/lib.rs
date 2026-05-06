@@ -80,6 +80,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/smol-rs/smol/master/assets/images/logo_fullsize_transparent.png"
 )]
+#![cfg_attr(feature = "allocator_api", feature(allocator_api))]
 
 extern crate alloc;
 #[cfg(feature = "std")]
@@ -105,6 +106,7 @@ macro_rules! leap_unwrap {
     }};
 }
 
+mod alloc_api;
 mod header;
 mod raw;
 mod runnable;
@@ -117,5 +119,14 @@ pub use crate::runnable::{
 };
 pub use crate::task::{FallibleTask, Task};
 
+#[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
+pub use crate::runnable::{spawn_in, spawn_unchecked_in};
+
 #[cfg(feature = "std")]
 pub use crate::runnable::spawn_local;
+
+#[cfg(all(
+    feature = "std",
+    any(feature = "allocator_api", feature = "allocator-api2")
+))]
+pub use crate::runnable::spawn_local_in;

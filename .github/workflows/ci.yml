@@ -32,6 +32,7 @@ jobs:
     uses: smol-rs/.github/.github/workflows/clippy.yml@main
     with:
       bench: false # We run clippy using stable rustc, but our benchmarks use #![feature(test)].
+      # features: 'std,portable-atomic,allocator-api2' # TODO: Action needs to support a new input to exclude nightly features.
   security_audit:
     uses: smol-rs/.github/.github/workflows/security_audit.yml@main
     permissions:
@@ -68,6 +69,11 @@ jobs:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: valgrind -v --error-exitcode=1 --error-limit=no --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --track-origins=yes --fair-sched=yes --gen-suppressions=all
       - name: Run cargo test (with portable-atomic enabled)
         run: cargo test --features portable-atomic
+      - name: Run cargo test (with allocator-api2 enabled)
+        run: cargo test --features allocator-api2
+      - name: Run cargo test (with nightly allocator_api enabled)
+        run: cargo test --features allocator_api
+        if: startsWith(matrix.rust, 'nightly')
       - name: Clone async-executor
         run: git clone https://github.com/smol-rs/async-executor.git
       - name: Add patch section
