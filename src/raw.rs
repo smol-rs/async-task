@@ -262,11 +262,7 @@ where
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => {
-                    // Update the state because we're continuing with polling the future.
-                    state = (state & !SCHEDULED) | RUNNING;
-                    break;
-                }
+                Ok(_) => break,
                 Err(s) => state = s,
             }
         }
@@ -304,6 +300,10 @@ where
                 // Replace the future with its output.
                 drop_future::<F>(ptr, &Self::TASK_LAYOUT);
                 raw.output.write(out);
+
+                // Reload the state because wakers may have changed it while the future was
+                // being polled, a stale state would make the first CAS below always fail.
+                state = (*header).state.load(Ordering::Acquire);
 
                 // The task is now completed.
                 loop {
@@ -350,6 +350,10 @@ where
             }
             Poll::Pending => {
                 let mut future_dropped = false;
+
+                // Reload the state because wakers may have changed it while the future was
+                // being polled, a stale state would make the first CAS below always fail.
+                state = (*header).state.load(Ordering::Acquire);
 
                 // The task is still not completed.
                 loop {
