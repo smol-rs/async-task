@@ -14,7 +14,7 @@ use smol::future;
 //
 // Usage: `future!(f, POLL, DROP)`
 //
-// The future `f` sleeps for 200 ms and then panics.
+// The future `f` sleeps for 400 ms and then panics.
 // When it gets polled, `POLL` is incremented.
 // When it gets dropped, `DROP` is incremented.
 macro_rules! future {
