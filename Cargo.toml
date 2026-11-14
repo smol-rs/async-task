@@ -35,3 +35,7 @@ smol = "2"
 # rewrite dependencies to use this version of async-task when running tests
 [patch.crates-io]
 async-task = { path = "." }
+
+[[example]]
+name = "spawn-local"
+required-features = ["std"]
