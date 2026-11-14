@@ -54,8 +54,8 @@ pub struct Task<T, M = ()> {
     pub(crate) _marker: PhantomData<(T, M)>,
 }
 
-unsafe impl<T: Send, M: Send + Sync> Send for Task<T, M> {}
-unsafe impl<T, M: Send + Sync> Sync for Task<T, M> {}
+unsafe impl<T: Send, M: Send> Send for Task<T, M> {}
+unsafe impl<T, M: Sync> Sync for Task<T, M> {}
 
 impl<T, M> Unpin for Task<T, M> {}
 
@@ -202,7 +202,10 @@ impl<T, M> Task<T, M> {
     ///
     /// Tasks can be created with a metadata object associated with them; by default, this
     /// is a `()` value. See the [`Builder::metadata()`] method for more information.
-    pub fn metadata(&self) -> &M {
+    pub fn metadata(&self) -> &M
+    where
+        M: Sync,
+    {
         let ptr = self.ptr.as_ptr();
         let header = ptr as *const HeaderWithMetadata<M>;
         &unsafe { &*header }.metadata
@@ -273,6 +276,11 @@ fn set_detached<T>(ptr: *const ()) -> Option<Result<T, Panic>> {
                                 if state & CLOSED == 0 {
                                     ((*header).vtable.schedule)(ptr, ScheduleInfo::new(false));
                                 } else {
+                                    // Drop metadata here, since `Task` has been dropped.
+                                    //
+                                    // Safe to call as metadata wouldn't have been
+                                    // dropped before, because we just removed `Task` reference.
+                                    ((*header).vtable.drop_metadata)(ptr);
                                     ((*header).vtable.destroy)(ptr);
                                 }
                             }
