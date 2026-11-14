@@ -720,6 +720,23 @@ impl<M> Runnable<M> {
         &self.header_with_metadata().metadata
     }
 
+    /// Get a pointer to the metadata associated with this task.
+    ///
+    /// Unlike [`Runnable::metadata`], this doesn't create any intermediate reference to
+    /// the task or the metadata, and doesn't require a reference to the task.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method is always safe, but dereferencing the returned pointer isn't.
+    /// The pointer is only guaranteed to be valid for the scope between matching calls to
+    /// [`Runnable::into_raw`] and [`Runnable::from_raw`]. The returned pointer aliases the
+    /// references returned by [`Runnable::metadata`] and [`Task::metadata`].
+    pub fn metadata_raw(ptr: NonNull<()>) -> NonNull<M> {
+        let header: *mut HeaderWithMetadata<M> = ptr.cast().as_ptr();
+        // TODO: Once the MSRV reaches 1.82 this can use &raw mut instead
+        unsafe { NonNull::new_unchecked(core::ptr::addr_of_mut!((*header).metadata)) }
+    }
+
     /// Schedules the task.
     ///
     /// This is a convenience method that passes the [`Runnable`] to the schedule function.
