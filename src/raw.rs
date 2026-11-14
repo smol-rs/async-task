@@ -223,8 +223,11 @@ where
         let raw = Self::from_ptr(ptr);
         let header = ptr as *const Header;
 
-        // Create a context from the raw task pointer and the vtable inside the its header.
-        let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(ptr, &Self::RAW_WAKER_VTABLE)));
+        // Reuse the stored vtable so `will_wake` recognizes cloned wakers.
+        let waker = ManuallyDrop::new(Waker::from_raw(RawWaker::new(
+            ptr,
+            (*header).vtable.raw_waker_vtable,
+        )));
         let cx = &mut Context::from_waker(&waker);
 
         let mut state = (*header).state.load(Ordering::Acquire);

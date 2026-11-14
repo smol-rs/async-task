@@ -301,6 +301,33 @@ fn waker() {
 }
 
 #[test]
+fn waker_identity_is_preserved_across_polls() {
+    let (sender, receiver) = flume::unbounded();
+    let schedule = move |runnable| sender.send(runnable).expect("schedule task");
+    let mut previous_waker = None;
+    let future = future::poll_fn(move |context| {
+        let cloned = context.waker().clone();
+        assert!(context.waker().will_wake(&cloned));
+        assert!(cloned.will_wake(context.waker()));
+
+        if let Some(previous) = previous_waker.take() {
+            assert!(context.waker().will_wake(&previous));
+            Poll::Ready(())
+        } else {
+            previous_waker = Some(cloned);
+            Poll::Pending
+        }
+    });
+    let (runnable, task) = async_task::spawn(future, schedule);
+    let waker = runnable.waker();
+    runnable.run();
+
+    waker.wake_by_ref();
+    receiver.try_recv().expect("receive woken task").run();
+    future::block_on(task);
+}
+
+#[test]
 fn raw() {
     // Dispatch schedules a function for execution at a later point. For tests, we execute it straight away.
     fn dispatch(trampoline: extern "C" fn(NonNull<()>), context: NonNull<()>) {
